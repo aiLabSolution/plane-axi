@@ -9,71 +9,71 @@ Use this skill when the user asks to inspect or change Plane.so project-manageme
 
 ## Setup
 
-Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx -y github:ailabsolution/plane-axi` with no arguments for a live directory-scoped dashboard. Select a default project with `npx -y github:ailabsolution/plane-axi use <project>`, or pass `--project <project>`.
+Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx -y plane-axi` with no arguments for a live directory-scoped dashboard. Select a default project with `npx -y plane-axi use <project>`, or pass `--project <project>`.
 
 ## Commands
 
 ### project
 
-- `npx -y github:ailabsolution/plane-axi project list` — List workspace projects
-- `npx -y github:ailabsolution/plane-axi project view <ref>` — Show a project
-- `npx -y github:ailabsolution/plane-axi project create --name <name> --identifier <id>` — Create a project
+- `npx -y plane-axi project list` — List workspace projects
+- `npx -y plane-axi project view <ref>` — Show a project
+- `npx -y plane-axi project create --name <name> --identifier <id>` — Create a project
 
 ### use
 
-- `npx -y github:ailabsolution/plane-axi use <project>` — Select the directory-scoped default project
+- `npx -y plane-axi use <project>` — Select the directory-scoped default project
 
 ### me
 
-- `npx -y github:ailabsolution/plane-axi me` — Show the authenticated Plane user
+- `npx -y plane-axi me` — Show the authenticated Plane user
 
 ### wi
 
-- `npx -y github:ailabsolution/plane-axi wi list [flags]` — List work items
-- `npx -y github:ailabsolution/plane-axi wi view <ref> [--full]` — Show a work item
-- `npx -y github:ailabsolution/plane-axi wi create --title <title> [flags]` — Create a work item
-- `npx -y github:ailabsolution/plane-axi wi update <ref> [flags]` — Update a work item
-- `npx -y github:ailabsolution/plane-axi wi assign <ref> <member>...` — Replace work item assignees
-- `npx -y github:ailabsolution/plane-axi wi close <ref>` — Move a work item to the first completed state
-- `npx -y github:ailabsolution/plane-axi wi delete <ref> --yes` — Delete a work item
-- `npx -y github:ailabsolution/plane-axi wi search <query> [--limit <n>|--all]` — Search work items across the workspace
+- `npx -y plane-axi wi list [flags]` — List work items
+- `npx -y plane-axi wi view <ref> [--full]` — Show a work item
+- `npx -y plane-axi wi create --title <title> [flags]` — Create a work item
+- `npx -y plane-axi wi update <ref> [flags]` — Update a work item
+- `npx -y plane-axi wi assign <ref> <member>...` — Replace work item assignees
+- `npx -y plane-axi wi close <ref>` — Move a work item to the first completed state
+- `npx -y plane-axi wi delete <ref> --yes` — Delete a work item
+- `npx -y plane-axi wi search <query> [--limit <n>|--all]` — Search work items across the workspace
 
 ### comment
 
-- `npx -y github:ailabsolution/plane-axi comment list <wi-ref> [--all]` — List comments or all activity
-- `npx -y github:ailabsolution/plane-axi comment add <wi-ref> (--body <text>|--body-file <path>)` — Add a comment
+- `npx -y plane-axi comment list <wi-ref> [--all]` — List comments or all activity
+- `npx -y plane-axi comment add <wi-ref> (--body <text>|--body-file <path>)` — Add a comment
 
 ### cycle
 
-- `npx -y github:ailabsolution/plane-axi cycle list [--project <ref>]` — List project cycles
-- `npx -y github:ailabsolution/plane-axi cycle view <ref>` — Show a cycle
-- `npx -y github:ailabsolution/plane-axi cycle create --name <name> [flags]` — Create a cycle
+- `npx -y plane-axi cycle list [--project <ref>]` — List project cycles
+- `npx -y plane-axi cycle view <ref>` — Show a cycle
+- `npx -y plane-axi cycle create --name <name> [flags]` — Create a cycle
 
 ### module
 
-- `npx -y github:ailabsolution/plane-axi module list [--project <ref>]` — List project modules
-- `npx -y github:ailabsolution/plane-axi module view <ref>` — Show a module
-- `npx -y github:ailabsolution/plane-axi module create --name <name> [flags]` — Create a module
+- `npx -y plane-axi module list [--project <ref>]` — List project modules
+- `npx -y plane-axi module view <ref>` — Show a module
+- `npx -y plane-axi module create --name <name> [flags]` — Create a module
 
 ### state
 
-- `npx -y github:ailabsolution/plane-axi state list [--project <ref>]` — List project workflow states
+- `npx -y plane-axi state list [--project <ref>]` — List project workflow states
 
 ### label
 
-- `npx -y github:ailabsolution/plane-axi label list [--project <ref>]` — List project labels
+- `npx -y plane-axi label list [--project <ref>]` — List project labels
 
 ### member
 
-- `npx -y github:ailabsolution/plane-axi member list` — List workspace members
+- `npx -y plane-axi member list` — List workspace members
 
 ### api
 
-- `npx -y github:ailabsolution/plane-axi api <METHOD> <path> [--input <json>]` — Call a Plane API path directly
+- `npx -y plane-axi api <METHOD> <path> [--input <json>]` — Call a Plane API path directly
 
 ### setup
 
-- `npx -y github:ailabsolution/plane-axi setup [--app <app>] [--scope <scope>] [--skill]` — Install session hooks or the generated skill
+- `npx -y plane-axi setup [--app <app>] [--scope <scope>] [--skill]` — Install session hooks or the generated skill
 
 ## Operating rules
 
@@ -81,4 +81,4 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 - Run a command with `--help` for its complete flags and examples.
 - Use `--full` only when a truncated work-item body needs expansion.
 - Work-item deletion requires explicit `--yes`.
-- Use `npx -y github:ailabsolution/plane-axi api <METHOD> <path>` only when the normal command surface does not cover the endpoint.
+- Use `npx -y plane-axi api <METHOD> <path>` only when the normal command surface does not cover the endpoint.
