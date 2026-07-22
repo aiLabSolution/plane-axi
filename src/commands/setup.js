@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { displayPath } from "../config.js";
+import { AxiError } from "../errors.js";
 
 async function exists(file) {
   try { await access(file); return true; } catch { return false; }
@@ -40,8 +41,17 @@ async function commandFor(executable) {
   return `${shellQuote(target)} snapshot`;
 }
 
-function mergeSessionHook(settings, command) {
+function mergeSessionHook(settings, command, file) {
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+    throw new AxiError(`invalid settings in ${displayPath(file)}`, { help: "Fix or remove the file, then rerun `plane-axi setup`" });
+  }
+  if (settings.hooks !== undefined && (typeof settings.hooks !== "object" || settings.hooks === null || Array.isArray(settings.hooks))) {
+    throw new AxiError(`invalid "hooks" in ${displayPath(file)}`, { help: "Fix or remove the hooks key, then rerun `plane-axi setup`" });
+  }
   settings.hooks ||= {};
+  if (settings.hooks.SessionStart !== undefined && !Array.isArray(settings.hooks.SessionStart)) {
+    throw new AxiError(`invalid "hooks.SessionStart" in ${displayPath(file)}`, { help: "Fix or remove the hooks.SessionStart key, then rerun `plane-axi setup`" });
+  }
   settings.hooks.SessionStart ||= [];
   let group = settings.hooks.SessionStart.find((entry) => entry?.hooks?.some((hook) => hook?.type === "command" && /plane-axi(?:\.js)?['\"]? snapshot$/.test(hook.command || "")));
   if (!group) {
@@ -55,13 +65,13 @@ function mergeSessionHook(settings, command) {
 
 async function installClaude(root, command) {
   const file = path.join(root, ".claude", "settings.json");
-  const settings = mergeSessionHook(await readJson(file), command);
+  const settings = mergeSessionHook(await readJson(file), command, file);
   return { app: "claude", file: displayPath(file), changed: await writeJsonIfChanged(file, settings) };
 }
 
 async function installCodex(root, command) {
   const file = path.join(root, ".codex", "hooks.json");
-  const settings = mergeSessionHook(await readJson(file), command);
+  const settings = mergeSessionHook(await readJson(file), command, file);
   return { app: "codex", file: displayPath(file), changed: await writeJsonIfChanged(file, settings), note: "Codex requires [features].hooks = true in config.toml" };
 }
 

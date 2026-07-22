@@ -47,3 +47,49 @@ test("generated skill installs for all supported agents", async () => {
     path.join(cwd, ".opencode", "skills", "plane-axi", "SKILL.md")
   ]) assert.match(await readFile(file, "utf8"), /name: plane-axi/);
 });
+
+test("a non-object hooks value in an existing settings file fails with a named AxiError", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "plane-axi-setup-bad-hooks-"));
+  await mkdir(path.join(cwd, ".claude"), { recursive: true });
+  await writeFile(path.join(cwd, ".claude", "settings.json"), '{"hooks":"disabled"}\n');
+  const executable = path.resolve("bin/plane-axi.js");
+  await assert.rejects(
+    () => setup({ flags: { app: "claude", scope: "project" }, cwd, executable }),
+    (error) => error.name === "AxiError" && /hooks/.test(error.message) && /settings\.json/.test(error.message) && Boolean(error.help)
+  );
+});
+
+test("a non-array SessionStart value in an existing settings file fails with a named AxiError", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "plane-axi-setup-bad-session-"));
+  await mkdir(path.join(cwd, ".claude"), { recursive: true });
+  await writeFile(path.join(cwd, ".claude", "settings.json"), '{"hooks":{"SessionStart":"nope"}}\n');
+  const executable = path.resolve("bin/plane-axi.js");
+  await assert.rejects(
+    () => setup({ flags: { app: "claude", scope: "project" }, cwd, executable }),
+    (error) => error.name === "AxiError" && /SessionStart/.test(error.message) && /settings\.json/.test(error.message) && Boolean(error.help)
+  );
+});
+
+test("a null-root settings file fails with a named AxiError instead of a raw TypeError", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "plane-axi-setup-bad-null-"));
+  await mkdir(path.join(cwd, ".claude"), { recursive: true });
+  await writeFile(path.join(cwd, ".claude", "settings.json"), "null\n");
+  const executable = path.resolve("bin/plane-axi.js");
+  await assert.rejects(
+    () => setup({ flags: { app: "claude", scope: "project" }, cwd, executable }),
+    (error) => error.name === "AxiError" && /settings\.json/.test(error.message) && Boolean(error.help)
+  );
+});
+
+test("an array-root settings file fails with a named AxiError instead of silently dropping the hook", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "plane-axi-setup-bad-array-"));
+  await mkdir(path.join(cwd, ".claude"), { recursive: true });
+  await writeFile(path.join(cwd, ".claude", "settings.json"), '["x"]\n');
+  const executable = path.resolve("bin/plane-axi.js");
+  await assert.rejects(
+    () => setup({ flags: { app: "claude", scope: "project" }, cwd, executable }),
+    (error) => error.name === "AxiError" && /settings\.json/.test(error.message) && Boolean(error.help)
+  );
+  const settings = JSON.parse(await readFile(path.join(cwd, ".claude", "settings.json"), "utf8"));
+  assert.deepEqual(settings, ["x"]);
+});

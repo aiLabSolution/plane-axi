@@ -25,13 +25,18 @@ export async function resolveWorkItem(api, ref, projectHint) {
   ref = validRef(ref, "work item");
   let project;
   let sequence;
-  const readable = /^(.+)-(\d+)$/.exec(ref);
-  if (readable) {
-    project = await resolveProject(api, readable[1]);
-    sequence = Number(readable[2]);
-  } else {
+  if (UUID.test(ref)) {
     if (!projectHint) throw new UsageError("work item UUID requires project context", "Pass `--project <project>` or run `plane-axi use <project>`");
     project = await resolveProject(api, projectHint);
+  } else {
+    const readable = /^(.+)-(\d+)$/.exec(ref);
+    if (readable) {
+      project = await resolveProject(api, readable[1]);
+      sequence = Number(readable[2]);
+    } else {
+      if (!projectHint) throw new UsageError("work item UUID requires project context", "Pass `--project <project>` or run `plane-axi use <project>`");
+      project = await resolveProject(api, projectHint);
+    }
   }
   const base = api.workspacePath(`/projects/${project.id}/work-items/`);
   if (UUID.test(ref)) {
