@@ -6,7 +6,7 @@ import { COMMAND_METADATA } from "../src/cli.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const target = path.join(root, "skill", "SKILL.md");
 
-const command = (value) => value.replace(/^plane-axi\b/gm, "npx -y github:ailabsolution/plane-axi");
+const command = (value) => value.replace(/^plane-axi\b/gm, "npx -y plane-axi");
 const groups = new Map();
 for (const [name, meta] of Object.entries(COMMAND_METADATA)) {
   if (name === "snapshot") continue;
@@ -27,7 +27,7 @@ Use this skill when the user asks to inspect or change Plane.so project-manageme
 
 ## Setup
 
-Set \`PLANE_API_KEY\` and \`PLANE_WORKSPACE\` (or \`PLANE_WORKSPACE_SLUG\`). Run \`npx -y github:ailabsolution/plane-axi\` with no arguments for a live directory-scoped dashboard. Select a default project with \`npx -y github:ailabsolution/plane-axi use <project>\`, or pass \`--project <project>\`.
+Set \`PLANE_API_KEY\` and \`PLANE_WORKSPACE\` (or \`PLANE_WORKSPACE_SLUG\`). Run \`npx -y plane-axi\` with no arguments for a live directory-scoped dashboard. Select a default project with \`npx -y plane-axi use <project>\`, or pass \`--project <project>\`.
 
 ## Commands
 
@@ -39,7 +39,7 @@ ${sections}
 - Run a command with \`--help\` for its complete flags and examples.
 - Use \`--full\` only when a truncated work-item body needs expansion.
 - Work-item deletion requires explicit \`--yes\`.
-- Use \`npx -y github:ailabsolution/plane-axi api <METHOD> <path>\` only when the normal command surface does not cover the endpoint.
+- Use \`npx -y plane-axi api <METHOD> <path>\` only when the normal command surface does not cover the endpoint.
 `;
 
 if (process.argv.includes("--check")) {

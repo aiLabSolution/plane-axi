@@ -1,5 +1,9 @@
 # plane-axi
 
+[![CI](https://github.com/aiLabSolution/plane-axi/actions/workflows/ci.yml/badge.svg)](https://github.com/aiLabSolution/plane-axi/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/aiLabSolution/plane-axi/actions/workflows/codeql.yml/badge.svg)](https://github.com/aiLabSolution/plane-axi/actions/workflows/codeql.yml)
+[![npm](https://img.shields.io/npm/v/plane-axi)](https://www.npmjs.com/package/plane-axi)
+
 An agent-first CLI for [Plane.so](https://plane.so): compact TOON output, strict non-interactive commands, directory-scoped project context, structured errors, session hooks, and an installable Agent Skill.
 
 ## Why a direct API client
@@ -9,7 +13,7 @@ An agent-first CLI for [Plane.so](https://plane.so): compact TOON output, strict
 ## Run it
 
 ```sh
-npm install -g github:ailabsolution/plane-axi
+npm install -g plane-axi
 export PLANE_API_KEY="<personal-access-token>"
 export PLANE_WORKSPACE="<workspace-slug>"
 plane-axi
@@ -18,7 +22,7 @@ plane-axi
 Or run it without a global install:
 
 ```sh
-npx -y github:ailabsolution/plane-axi
+npx -y plane-axi
 ```
 
 `PLANE_WORKSPACE_SLUG` is accepted as an alias. Self-hosted or alternate API hosts can set `PLANE_BASE_URL`; both `https://host` and `https://host/api/v1` forms work.
