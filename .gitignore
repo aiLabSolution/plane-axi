@@ -1,0 +1,9 @@
+.plane-axi.json
+node_modules/
+npm-debug.log*
+
+# Local planning and agent-development configuration
+PLAN.md
+.agents/
+.claude/
+skills-lock.json

@@ -1,0 +1,33 @@
+{
+  "name": "plane-axi",
+  "version": "0.1.0",
+  "description": "Agent-first Plane.so CLI with compact TOON output",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ailabsolution/plane-axi.git"
+  },
+  "homepage": "https://github.com/ailabsolution/plane-axi#readme",
+  "bugs": {
+    "url": "https://github.com/ailabsolution/plane-axi/issues"
+  },
+  "type": "module",
+  "bin": {
+    "plane-axi": "bin/plane-axi.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "scripts",
+    "skill",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test",
+    "skill:generate": "node scripts/gen-skill.mjs",
+    "skill:check": "node scripts/gen-skill.mjs --check"
+  },
+  "license": "MIT"
+}
