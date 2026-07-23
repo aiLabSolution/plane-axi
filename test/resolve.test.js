@@ -104,6 +104,51 @@ test("resolveProject: PLANE_AXI_NO_CACHE=1 bypasses a populated cache entirely",
   assert.equal(await cachedProjectId(cacheFile, "labsolution", "labs"), "stale-uuid");
 });
 
+test("resolveProject: an exact identifier match wins over a project that merely shares the name (cold scan)", async () => {
+  const cacheFile = await tmpCacheFile();
+  const owner = { id: "owner-uuid", identifier: "ENG", name: "Engineering" };
+  const nameTwin = { id: "twin-uuid", identifier: "OPS", name: "ENG" };
+  const api = {
+    config: { workspace: "labsolution" },
+    workspacePath: (suffix) => suffix,
+    get: async () => { throw new Error("a non-uuid ref should not direct-GET before the scan"); },
+    all: async () => ({ results: [nameTwin, owner], total: 2 })
+  };
+  const result = await resolveProject(api, "ENG", cacheFile);
+  assert.equal(result.id, "owner-uuid"); // identifier is canonical/unique; not "ambiguous"
+});
+
+test("resolveProject: a warm cache resolves the identifier owner without a scan (warm and cold agree)", async () => {
+  const cacheFile = await tmpCacheFile();
+  const owner = { id: "owner-uuid", identifier: "ENG", name: "Engineering" };
+  const nameTwin = { id: "twin-uuid", identifier: "OPS", name: "ENG" };
+  await rememberProjects(cacheFile, "labsolution", [nameTwin, owner]);
+  const api = {
+    config: { workspace: "labsolution" },
+    workspacePath: (suffix) => suffix,
+    get: async (path) => { assert.equal(path, "/projects/owner-uuid/"); return owner; },
+    all: async () => { throw new Error("a warm identifier hit should not scan"); }
+  };
+  const result = await resolveProject(api, "ENG", cacheFile);
+  assert.equal(result.id, "owner-uuid");
+});
+
+test("resolveProject: a ref matching two projects only by name is still ambiguous", async () => {
+  const cacheFile = await tmpCacheFile();
+  const a = { id: "a-uuid", identifier: "AAA", name: "Shared" };
+  const b = { id: "b-uuid", identifier: "BBB", name: "Shared" };
+  const api = {
+    config: { workspace: "labsolution" },
+    workspacePath: (suffix) => suffix,
+    get: async () => { throw new Error("no direct GET for a name-only ref"); },
+    all: async () => ({ results: [a, b], total: 2 })
+  };
+  await assert.rejects(
+    () => resolveProject(api, "Shared", cacheFile),
+    (error) => error instanceof AxiError && /ambiguous project reference Shared/.test(error.message)
+  );
+});
+
 test("resolveWorkItem: a cache hit resolves the item via one direct GET and never scans", async () => {
   const cacheFile = await tmpCacheFile();
   const project = { id: "proj-uuid-1", identifier: "LABS", name: "Labs" };

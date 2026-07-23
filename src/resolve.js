@@ -26,17 +26,26 @@ export async function resolveProject(api, ref, cacheFile = cachePath()) {
   } else if (workspace) {
     const cached = await cachedProjectId(cacheFile, workspace, ref.toLowerCase());
     if (cached) {
+      // The cache only ever keys on identifier, and identifiers are unique per workspace, so a
+      // hit whose fetched identifier still matches is the canonical winner — accept it without a
+      // scan. Only confirm the identifier (not the name): a warm hit must resolve identically to a
+      // cold scan, and the cold scan lets an identifier match win over a project sharing the name.
       const project = await getOk404(api, `${base}${cached}/`);
-      const lower = ref.toLowerCase();
-      if (project && (project.identifier?.toLowerCase() === lower || project.name?.toLowerCase() === lower)) return project;
+      if (project && project.identifier?.toLowerCase() === ref.toLowerCase()) return project;
     }
   }
   const { results } = await api.all(base);
   if (workspace) await rememberProjects(cacheFile, workspace, results);
   const lower = ref.toLowerCase();
-  const exact = results.filter((project) => project.identifier?.toLowerCase() === lower || project.name?.toLowerCase() === lower || project.id === ref);
-  if (exact.length === 1) return exact[0];
-  if (exact.length > 1) throw new AxiError(`ambiguous project reference ${ref}`, { help: exact.map((project) => `${project.identifier}: ${project.id}`) });
+  // Identifiers (and ids) are unique per workspace and are the canonical project reference, so an
+  // exact identifier/id match wins over a project that merely shares the name. Name is only
+  // consulted when nothing matches by identifier/id (where two same-named projects stay ambiguous).
+  const byId = results.filter((project) => project.identifier?.toLowerCase() === lower || project.id === ref);
+  if (byId.length === 1) return byId[0];
+  if (byId.length > 1) throw new AxiError(`ambiguous project reference ${ref}`, { help: byId.map((project) => `${project.identifier}: ${project.id}`) });
+  const byName = results.filter((project) => project.name?.toLowerCase() === lower);
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1) throw new AxiError(`ambiguous project reference ${ref}`, { help: byName.map((project) => `${project.identifier}: ${project.id}`) });
   throw new AxiError(`project ${ref} not found`, { help: "Run `plane-axi project list` to see projects" });
 }
 

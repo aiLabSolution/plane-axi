@@ -13,9 +13,12 @@ function esc(s) {
 }
 
 function link(full, text, url) {
-  // Both text/url are already esc()'d by the caller. Reject protocol-relative (//host)
-  // and any non-allowlisted scheme — render the literal markdown instead of an <a>
-  // (no javascript:/data:/off-site smuggling).
+  // Both text/url are already esc()'d by the caller. Allowlist: http(s)/mailto schemes plus
+  // root-relative (/…), anchor (#…) and dot-relative (./… ../…) targets. Reject protocol-relative
+  // (//host) and any non-allowlisted scheme — render the literal markdown instead of an <a>
+  // (no javascript:/data:/off-site smuggling). A bare path-relative target (e.g. docs/guide.md)
+  // is intentionally NOT allowlisted and renders literally — kept byte-for-byte with the Python
+  // _link in lis-control/scripts/plane_issue.py; broadening it would need the same change there.
   if (url.startsWith("//") || !/^(?:https?:|mailto:|\/|#|\.)/i.test(url)) return full;
   return `<a href="${url}">${text}</a>`;
 }
@@ -123,6 +126,11 @@ export function mdToHtml(md) {
         const ind = lm[1].length;
         const lordered = isOrdered(lm[2]);
         if (ind > base && items.length) {                         // nested under previous item
+          // Known shared-renderer limitation (kept byte-for-byte with plane_issue.py's
+          // items[-1][2] = lordered): a parent's nested children all land in one run, and its
+          // ol/ul is decided by the LAST child's marker — so mixing `- a` then `1. b` under one
+          // item renders both in a single list of the last type. The PRD/slice template does not
+          // mix nested marker types, so this is left as-is to preserve Python parity.
           items[items.length - 1][1].push(renderLi(lm[3]));
           items[items.length - 1][2] = lordered;
         } else if (ind === base && lordered === ordered) {         // sibling

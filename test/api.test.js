@@ -135,3 +135,27 @@ test("a POST is never retried on a network failure (a replay could double-write)
   await assert.rejects(() => api.post("/x", { name: "A" }), (error) => error.message === "could not connect to the Plane API");
   assert.equal(calls, 1);
 });
+
+test("a GET whose retry times out reports a timeout, not could-not-connect", async () => {
+  let calls = 0;
+  const api = new PlaneApi(config, async () => {
+    calls += 1;
+    if (calls === 1) { const error = new TypeError("fetch failed"); error.cause = new Error("ECONNRESET"); throw error; }
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    throw error;
+  }, noDelay);
+  await assert.rejects(() => api.get("/x"), (error) => error.message === "Plane API request timed out");
+  assert.equal(calls, 2);
+});
+
+test("a GET whose retry raises a non-network error surfaces that real message", async () => {
+  let calls = 0;
+  const api = new PlaneApi(config, async () => {
+    calls += 1;
+    if (calls === 1) { const error = new TypeError("fetch failed"); error.cause = new Error("ECONNRESET"); throw error; }
+    throw new Error("Request with GET/HEAD method cannot have body.");
+  }, noDelay);
+  await assert.rejects(() => api.get("/x"), (error) => error.message === "Request with GET/HEAD method cannot have body." && !error.help);
+  assert.equal(calls, 2);
+});

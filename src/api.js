@@ -20,6 +20,24 @@ function messageFromBody(body) {
   return null;
 }
 
+const NETWORK_HELP = "Check your network connection and PLANE_BASE_URL";
+
+// A fetch rejection is a network blip only if it's an undici TypeError carrying a cause
+// (DNS/ECONNREFUSED/reset) or the bare "fetch failed". A TimeoutError and any other error
+// are NOT network failures, so they never trigger the GET retry.
+function isNetworkFailure(error) {
+  return (error instanceof TypeError && error.cause !== undefined) || error?.message === "fetch failed";
+}
+
+// Map a fetch rejection to its user-facing AxiError. Applied to BOTH the first attempt and
+// the retry so a retry-time timeout (or any non-network error) keeps its true classification
+// instead of being flattened into "could not connect".
+function classifyFetchError(error) {
+  if (error?.name === "TimeoutError") return new AxiError("Plane API request timed out", { help: NETWORK_HELP });
+  if (isNetworkFailure(error)) return new AxiError("could not connect to the Plane API", { help: NETWORK_HELP });
+  return new AxiError(error?.message || "unexpected error calling the Plane API");
+}
+
 // Plane's own 401/403 bodies are JSON. A 401/403 that is HTML (or carries Cloudflare's
 // challenge markers/headers) is the WAF blocking the request before it reached Plane —
 // reporting it as "authentication failed" sends the caller chasing the wrong fix.
@@ -62,25 +80,18 @@ export class PlaneApi {
     try {
       response = await this.fetch(url, buildInit());
     } catch (error) {
-      if (error?.name === "TimeoutError") {
-        throw new AxiError("Plane API request timed out", { help: "Check your network connection and PLANE_BASE_URL" });
-      }
-      const isNetworkFailure = (error instanceof TypeError && error.cause !== undefined) || error?.message === "fetch failed";
-      if (isNetworkFailure) {
-        // Idempotent reads get one retry after a network blip; a replayed POST could
-        // double-write, so only GET ever retries (port of planelib.py's rule).
-        if (method === "GET") {
-          await this.delay(1000);
-          try {
-            response = await this.fetch(url, buildInit());
-          } catch {
-            throw new AxiError("could not connect to the Plane API", { help: "Check your network connection and PLANE_BASE_URL" });
-          }
-        } else {
-          throw new AxiError("could not connect to the Plane API", { help: "Check your network connection and PLANE_BASE_URL" });
+      // Idempotent reads get one retry after a network blip; a replayed POST could
+      // double-write, so only GET ever retries (port of planelib.py's rule). The retry's
+      // own failure is re-classified so a retry-time timeout stays a timeout.
+      if (method === "GET" && isNetworkFailure(error)) {
+        await this.delay(1000);
+        try {
+          response = await this.fetch(url, buildInit());
+        } catch (retryError) {
+          throw classifyFetchError(retryError);
         }
       } else {
-        throw new AxiError(error?.message || "unexpected error calling the Plane API");
+        throw classifyFetchError(error);
       }
     }
     if (response.status === 204) return null;
