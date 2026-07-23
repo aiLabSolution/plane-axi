@@ -1,3 +1,4 @@
+import { cachedItemId, cachedProjectId, cachePath, rememberItems, rememberProjects } from "./cache.js";
 import { AxiError, UsageError } from "./errors.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -7,13 +8,31 @@ function validRef(ref, label) {
   return String(ref);
 }
 
-export async function resolveProject(api, ref) {
+// A 404 on a cached uuid means the cache entry is stale (renamed/deleted target); treat
+// it as a miss so the caller falls back to a fresh scan instead of failing the command.
+async function getOk404(api, path) {
+  return api.get(path).catch((error) => {
+    if (error.status !== 404) throw error;
+    return null;
+  });
+}
+
+export async function resolveProject(api, ref, cacheFile = cachePath()) {
   ref = validRef(ref, "project");
   const base = api.workspacePath("/projects/");
+  const workspace = api.config?.workspace;
   if (UUID.test(ref)) {
     try { return await api.get(`${base}${ref}/`); } catch (error) { if (error.status !== 404) throw error; }
+  } else if (workspace) {
+    const cached = await cachedProjectId(cacheFile, workspace, ref.toLowerCase());
+    if (cached) {
+      const project = await getOk404(api, `${base}${cached}/`);
+      const lower = ref.toLowerCase();
+      if (project && (project.identifier?.toLowerCase() === lower || project.name?.toLowerCase() === lower)) return project;
+    }
   }
   const { results } = await api.all(base);
+  if (workspace) await rememberProjects(cacheFile, workspace, results);
   const lower = ref.toLowerCase();
   const exact = results.filter((project) => project.identifier?.toLowerCase() === lower || project.name?.toLowerCase() === lower || project.id === ref);
   if (exact.length === 1) return exact[0];
@@ -21,28 +40,38 @@ export async function resolveProject(api, ref) {
   throw new AxiError(`project ${ref} not found`, { help: "Run `plane-axi project list` to see projects" });
 }
 
-export async function resolveWorkItem(api, ref, projectHint) {
+export async function resolveWorkItem(api, ref, projectHint, cacheFile = cachePath()) {
   ref = validRef(ref, "work item");
   let project;
   let sequence;
   if (UUID.test(ref)) {
     if (!projectHint) throw new UsageError("work item UUID requires project context", "Pass `--project <project>` or run `plane-axi use <project>`");
-    project = await resolveProject(api, projectHint);
+    project = await resolveProject(api, projectHint, cacheFile);
   } else {
     const readable = /^(.+)-(\d+)$/.exec(ref);
     if (readable) {
-      project = await resolveProject(api, readable[1]);
+      project = await resolveProject(api, readable[1], cacheFile);
       sequence = Number(readable[2]);
     } else {
       if (!projectHint) throw new UsageError("work item UUID requires project context", "Pass `--project <project>` or run `plane-axi use <project>`");
-      project = await resolveProject(api, projectHint);
+      project = await resolveProject(api, projectHint, cacheFile);
     }
   }
   const base = api.workspacePath(`/projects/${project.id}/work-items/`);
+  const workspace = api.config?.workspace;
   if (UUID.test(ref)) {
     try { return { project, item: await api.get(`${base}${ref}/`) }; } catch (error) { if (error.status !== 404) throw error; }
+  } else if (workspace && sequence !== undefined) {
+    const cached = await cachedItemId(cacheFile, workspace, `${project.id}:${sequence}`);
+    if (cached) {
+      const item = await getOk404(api, `${base}${cached}/`);
+      if (item && item.sequence_id === sequence) return { project, item };
+    }
   }
-  const { results } = await api.all(base);
+  // state is kept (not just id/sequence_id/name) because wi close reads the resolved
+  // item's current state; the bare uuid string + stateById map still resolves it.
+  const { results } = await api.all(base, { fields: "id,sequence_id,name,state" });
+  if (workspace) await rememberItems(cacheFile, workspace, project.id, results);
   const matches = results.filter((item) => item.id === ref || item.sequence_id === sequence);
   if (matches.length === 1) return { project, item: matches[0] };
   if (matches.length > 1) throw new AxiError(`ambiguous work item reference ${ref}`, { help: matches.map((item) => item.id) });

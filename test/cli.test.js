@@ -84,6 +84,20 @@ test("--body allows an explicit empty value on wi create too", () => {
   assert.equal(parsed.flags.body, "");
 });
 
+test("a bare - is accepted as a flag value (stdin marker), space or equals form", () => {
+  const spaced = _internals.parseFlags("comment add", COMMAND_METADATA["comment add"], ["LABS-1", "--body-file", "-"]);
+  assert.equal(spaced.flags["body-file"], "-");
+  const equals = _internals.parseFlags("comment add", COMMAND_METADATA["comment add"], ["LABS-1", "--body-file=-"]);
+  assert.equal(equals.flags["body-file"], "-");
+});
+
+test("a value that looks like a flag (leading --) is still rejected", () => {
+  assert.throws(
+    () => _internals.parseFlags("comment add", COMMAND_METADATA["comment add"], ["LABS-1", "--body-file", "--body"]),
+    (error) => error.name === "UsageError" && /--body-file requires a value/.test(error.message)
+  );
+});
+
 test("group --help lists group subcommands with exit 0 instead of failing", async () => {
   const result = await captureMain(["wi", "--help"]);
   assert.equal(result.status, 0);
@@ -131,6 +145,12 @@ test("prototype-chain flag names are rejected as unknown flags", async () => {
   const result = await captureMain(["me", "--constructor", "x"], { api });
   assert.equal(result.status, 2);
   assert.match(result.stdout, /unknown flag --constructor/);
+});
+
+test("render prints the plain HTML string via main(), not TOON-quoted", async () => {
+  const result = await captureMain(["render", "--body", "line one\nline two"]);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "<p>line one<br>line two</p>\n");
 });
 
 test("main never crashes when an error message contains a lone surrogate", async () => {

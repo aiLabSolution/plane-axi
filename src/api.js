@@ -1,5 +1,12 @@
+import { createRequire } from "node:module";
 import { AxiError } from "./errors.js";
 import { assertCredentials, envConfig } from "./config.js";
+
+// Read the package version once at module load (no per-request JSON.parse churn); some
+// Cloudflare-fronted Plane instances filter unrecognised User-Agents, so PLANE_USER_AGENT
+// lets an operator override this to a known-safe value (e.g. "plane-cli/1.0") per request.
+const PACKAGE_VERSION = createRequire(import.meta.url)("../package.json").version;
+const DEFAULT_USER_AGENT = `plane-axi/${PACKAGE_VERSION}`;
 
 function messageFromBody(body) {
   if (!body) return null;
@@ -13,10 +20,22 @@ function messageFromBody(body) {
   return null;
 }
 
+// Plane's own 401/403 bodies are JSON. A 401/403 that is HTML (or carries Cloudflare's
+// challenge markers/headers) is the WAF blocking the request before it reached Plane —
+// reporting it as "authentication failed" sends the caller chasing the wrong fix.
+function isCloudflareWaf(status, text, headers) {
+  if (status !== 401 && status !== 403) return false;
+  const trimmed = (text || "").trim();
+  const html = trimmed.startsWith("<");
+  if (html || trimmed.includes("Attention Required") || trimmed.includes("Cloudflare")) return true;
+  return Boolean(headers.get("cf-mitigated") || headers.get("cf-ray")) && html;
+}
+
 export class PlaneApi {
-  constructor(config = envConfig(), fetchImpl = globalThis.fetch) {
+  constructor(config = envConfig(), fetchImpl = globalThis.fetch, delayImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
     this.config = config;
     this.fetch = fetchImpl;
+    this.delay = delayImpl;
   }
 
   workspacePath(path = "") {
@@ -29,27 +48,40 @@ export class PlaneApi {
     for (const [key, value] of Object.entries(query || {})) {
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
     }
+    const buildInit = () => ({
+      method,
+      headers: {
+        "X-API-Key": this.config.apiKey,
+        "Content-Type": "application/json",
+        "User-Agent": process.env.PLANE_USER_AGENT || DEFAULT_USER_AGENT
+      },
+      body: data === undefined ? undefined : JSON.stringify(data),
+      signal: AbortSignal.timeout(30_000)
+    });
     let response;
     try {
-      response = await this.fetch(url, {
-        method,
-        headers: {
-          "X-API-Key": this.config.apiKey,
-          "Content-Type": "application/json",
-          "User-Agent": "plane-axi/0.1"
-        },
-        body: data === undefined ? undefined : JSON.stringify(data),
-        signal: AbortSignal.timeout(30_000)
-      });
+      response = await this.fetch(url, buildInit());
     } catch (error) {
       if (error?.name === "TimeoutError") {
         throw new AxiError("Plane API request timed out", { help: "Check your network connection and PLANE_BASE_URL" });
       }
       const isNetworkFailure = (error instanceof TypeError && error.cause !== undefined) || error?.message === "fetch failed";
       if (isNetworkFailure) {
-        throw new AxiError("could not connect to the Plane API", { help: "Check your network connection and PLANE_BASE_URL" });
+        // Idempotent reads get one retry after a network blip; a replayed POST could
+        // double-write, so only GET ever retries (port of planelib.py's rule).
+        if (method === "GET") {
+          await this.delay(1000);
+          try {
+            response = await this.fetch(url, buildInit());
+          } catch {
+            throw new AxiError("could not connect to the Plane API", { help: "Check your network connection and PLANE_BASE_URL" });
+          }
+        } else {
+          throw new AxiError("could not connect to the Plane API", { help: "Check your network connection and PLANE_BASE_URL" });
+        }
+      } else {
+        throw new AxiError(error?.message || "unexpected error calling the Plane API");
       }
-      throw new AxiError(error?.message || "unexpected error calling the Plane API");
     }
     if (response.status === 204) return null;
     const text = await response.text();
@@ -58,6 +90,12 @@ export class PlaneApi {
       try { body = JSON.parse(text); } catch { body = text; }
     }
     if (!response.ok) {
+      if (isCloudflareWaf(response.status, text, response.headers)) {
+        throw new AxiError("Cloudflare WAF blocked the request", {
+          help: "Some Cloudflare-fronted Plane instances block bodies that look like path traversal (`../`) or literal shell command lines; rephrase the body and retry",
+          status: response.status
+        });
+      }
       if (response.status === 401 || response.status === 403) {
         throw new AxiError("Plane authentication failed", { help: "Check PLANE_API_KEY and workspace access", status: response.status });
       }
@@ -101,4 +139,4 @@ export class PlaneApi {
   }
 }
 
-export const _internals = { messageFromBody };
+export const _internals = { messageFromBody, isCloudflareWaf, DEFAULT_USER_AGENT };

@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
 import { findProjectConfig } from "../config.js";
 import { UsageError } from "../errors.js";
-import { htmlParagraph, stripHtml, withHelp } from "../output.js";
+import { mdToHtml } from "../markdown.js";
+import { stripHtml, withHelp } from "../output.js";
 import { resolveWorkItem } from "../resolve.js";
-import { projectPath, requireOne } from "./common.js";
+import { projectPath, readBody, requireOne } from "./common.js";
 
 async function context({ api, flags, positionals, cwd }) {
   const projectHint = flags.project || (await findProjectConfig(cwd))?.project;
@@ -27,11 +27,11 @@ export async function commentList(ctx) {
 export async function commentAdd(ctx) {
   const { api, flags } = ctx;
   const selected = requireOne(flags, ["body", "body-file"], "comment requires --body or --body-file");
-  const body = selected === "body" ? flags.body : await readFile(flags["body-file"], "utf8").catch(() => {
-    throw new UsageError(`cannot read body file ${flags["body-file"]}`, "Check that the path exists and is readable");
-  });
+  const raw = selected === "body" ? flags.body : await readBody(flags["body-file"]);
+  const html = mdToHtml(raw.trim());
+  if (!html) throw new UsageError("empty comment body");
   const { project, item } = await context(ctx);
-  const created = await api.post(`${projectPath(api, project, "/work-items/")}${item.id}/comments/`, { comment_html: htmlParagraph(body) });
+  const created = await api.post(`${projectPath(api, project, "/work-items/")}${item.id}/comments/`, { comment_html: html });
   return withHelp({ comment: { id: created?.id || null, work_item: `${project.identifier}-${item.sequence_id}` }, result: "added" }, [
     `Run \`plane-axi comment list ${project.identifier}-${item.sequence_id}\` to verify`
   ]);

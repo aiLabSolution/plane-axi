@@ -55,14 +55,3 @@ export function truncate(value, limit = 1000) {
   if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
   return { text: `${text.slice(0, cut)}\n... (truncated, ${text.length} chars total)`, truncated: true, total: text.length };
 }
-
-export function htmlParagraph(text) {
-  const escaped = String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/\n/g, "<br>");
-  return `<p>${escaped}</p>`;
-}

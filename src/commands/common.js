@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { selectedProject } from "../config.js";
 import { UsageError } from "../errors.js";
 import { resolveProject } from "../resolve.js";
@@ -31,6 +32,26 @@ export function requireOne(flags, names, message) {
   const present = names.filter((name) => flags[name] !== undefined);
   if (present.length !== 1) throw new UsageError(message, `Use exactly one of ${names.map((name) => `--${name}`).join(" or ")}`);
   return present[0];
+}
+
+export function atMostOne(flags, names, message) {
+  const present = names.filter((name) => flags[name] !== undefined);
+  if (present.length > 1) throw new UsageError(message, `Use at most one of ${names.map((name) => `--${name}`).join(" or ")}`);
+  return present[0];
+}
+
+async function readStdin() {
+  process.stdin.setEncoding("utf8");
+  let data = "";
+  for await (const chunk of process.stdin) data += chunk;
+  return data;
+}
+
+export async function readBody(path) {
+  if (path === "-") return readStdin();
+  return readFile(path, "utf8").catch(() => {
+    throw new UsageError(`cannot read body file ${path}`, "Check that the path exists and is readable");
+  });
 }
 
 export function requireDate(value, flag) {

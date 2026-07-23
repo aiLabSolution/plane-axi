@@ -58,6 +58,38 @@ plane-axi member list
 
 References accept UUIDs, project identifiers or exact names, and readable work-item IDs such as `LABS-42`. Run any command with `--help` for its complete flags and examples. Unknown flags fail before any API call with exit code 2 and an inline list of valid flags.
 
+## Markdown bodies
+
+`wi create`, `wi update`, and `comment add` render their body through a small, dependency-free markdown-to-HTML pass before sending it as `description_html` / `comment_html`. Coverage matches a PRD/slice-note template: ATX headings, `-`/`*`/`+` and `1.` lists with one level of nesting, `[ ]`/`[x]` task items, fenced ` ``` ` code blocks, blockquotes, `---` rules, blank-line paragraphs, and inline `**bold**`, `` `code` ``, and `[text](url)` links (`http(s)`/`mailto`/relative only — everything else, including `javascript:` and protocol-relative `//host` links, renders as literal text). Plain text with no markdown still renders to a single `<p>` exactly as before.
+
+Every body-accepting flag has a `--body-file <path>` counterpart; pass `-` to read from stdin:
+
+```sh
+plane-axi wi create --title "Ship auth fix" --body-file slice.md
+printf '%s' "$BODY" | plane-axi wi update LABS-42 --body-file -
+plane-axi comment add LABS-42 --body-file progress.md
+```
+
+Preview the exact HTML a body would produce — no network call, no credentials required:
+
+```sh
+plane-axi render --body-file slice.md
+plane-axi render --body "Some **bold** text"
+cat slice.md | plane-axi render --body-file -
+```
+
+`--body`/`--body-file` are mutually exclusive on `wi create`/`wi update` (both optional; pass neither to leave the body alone). `wi update --body ""` explicitly clears the description; an empty rendered `comment add` body is a usage error.
+
+## Reference cache
+
+Resolving a readable reference like `LABS-42` normally means a full project/work-item scan. `plane-axi` keeps a small lookaside cache at `$XDG_CACHE_HOME/plane-axi/refs.json` (default `~/.cache/plane-axi/refs.json`) mapping identifiers and sequence numbers to their UUIDs, so a repeat reference resolves with one direct `GET` instead of a rescan. Sequence assignments are immutable, so entries never expire; a stale entry (renamed or deleted target) 404s and self-heals with one fresh scan. A broken or corrupt cache file is treated as empty — it is never a fatal error. Set `PLANE_AXI_NO_CACHE=1` to bypass it entirely (useful for benchmarking or a read-only filesystem).
+
+List and search scans also request only the fields each command needs (`?fields=`/`?expand=`), which Plane honors even though it ignores filter params — this keeps repeated scans well under the per-token rate budget.
+
+## Cloudflare / WAF
+
+Some Cloudflare-fronted Plane instances filter unrecognized `User-Agent` headers. `plane-axi` sends `plane-axi/<version>` by default; set `PLANE_USER_AGENT` to override it (a known-safe value in the field is `plane-cli/1.0`) if your instance blocks the default. If a request is blocked by the WAF before it reaches Plane, the response is an HTML challenge page rather than Plane's JSON, and `plane-axi` reports it distinctly as `Cloudflare WAF blocked the request` rather than a misleading authentication failure. This is most often triggered by a work-item body containing path-traversal-looking strings (`../`) or literal shell command lines — rephrase the body and retry. A `GET` that fails to connect at the network level (not a WAF block) is retried once after a one-second pause before failing; mutating requests (`POST`/`PATCH`/`DELETE`) are never retried, since a replay could double-write.
+
 ## Agent integration
 
 Install compact SessionStart context for Claude Code, Codex, and OpenCode:
