@@ -55,6 +55,10 @@ function requestedFields(value) {
   return fields;
 }
 
+function quoteFilterValue(value) {
+  return /\s/.test(value) ? `"${value}"` : value;
+}
+
 function limitValue(flags) {
   if (flags.all) return Infinity;
   const limit = Number(flags.limit ?? 50);
@@ -71,7 +75,8 @@ async function resolveState(api, project, ref) {
   if (!ref) return null;
   const states = await statesFor(api, project);
   const lower = ref.toLowerCase();
-  const matches = states.filter((state) => state.id === ref || state.name?.toLowerCase() === lower);
+  let matches = states.filter((state) => state.id === ref || state.name?.toLowerCase() === lower);
+  if (!matches.length) matches = states.filter((state) => state.group?.toLowerCase() === lower);
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) throw new AxiError(`ambiguous state ${ref}`, { help: matches.map((state) => `${state.name}: ${state.id}`) });
   throw new AxiError(`state ${ref} not found`, { help: `Run \`plane-axi state list --project ${project.identifier}\`` });
@@ -107,10 +112,13 @@ export async function wiList({ api, flags, cwd }) {
   }
   const matching = needsAll ? items.length : response.total;
   items = items.slice(0, limit);
-  const filters = [flags.state && `--state ${flags.state}`, priority && `--priority ${priority}`, flags.assignee && `--assignee ${flags.assignee}`].filter(Boolean).join(" ");
+  const filters = [flags.state && `--state ${quoteFilterValue(flags.state)}`, priority && `--priority ${quoteFilterValue(priority)}`, flags.assignee && `--assignee ${quoteFilterValue(flags.assignee)}`].filter(Boolean).join(" ");
   if (!items.length) return { wi: `0 work items${filters ? ` matching ${filters}` : ""} in project ${project.identifier}` };
   const hints = ["Run `plane-axi wi view <ref>` for details"];
-  if (matching > items.length) hints.push(`Run \`plane-axi wi list --all${flags.project ? ` --project ${project.identifier}` : ""}\` for all ${matching} matching items`);
+  if (matching > items.length) {
+    const extra = [filters, flags.project ? `--project ${project.identifier}` : ""].filter(Boolean).join(" ");
+    hints.push(`Run \`plane-axi wi list --all${extra ? ` ${extra}` : ""}\` for all ${matching} matching items`);
+  }
   return withHelp({ count: `${items.length} of ${matching} matching (${response.total} total)`, project: project.identifier, wi: items.map((item) => compactItem(item, project, stateById, fields)) }, hints);
 }
 
@@ -122,22 +130,21 @@ export async function wiView(ctx) {
   const state = stateObject(item, new Map(states.map((entry) => [entry.id, entry])));
   const body = stripHtml(item.description_html || item.description || "");
   const preview = flags.full ? { text: body, truncated: false } : truncate(body, 1000);
-  const result = { work_item: {
+  const seq = `${project.identifier}-${item.sequence_id}`;
+  const hints = [`Run \`plane-axi comment list ${seq}\` for comments`];
+  if (preview.truncated) hints.push(`Run \`plane-axi wi view ${seq} --full\` to see the complete body`);
+  return withHelp({ work_item: {
     id: item.id,
-    seq: `${project.identifier}-${item.sequence_id}`,
+    seq,
     title: item.name,
     state: state?.name || item.state || "Unknown",
     priority: item.priority || "none",
     assignees: assigneeValues(item),
     labels: (item.labels || item.label_details || []).map((label) => typeof label === "string" ? label : label.name || label.id),
     body: preview.text,
-    comments: item.comment_count ?? item.comments_count ?? 0,
-    sub_items: item.sub_issues_count ?? item.sub_items_count ?? 0,
     created_at: item.created_at || null,
     updated_at: item.updated_at || null
-  } };
-  if (preview.truncated) result.help = [`Run \`plane-axi wi view ${project.identifier}-${item.sequence_id} --full\` to see the complete body`];
-  return result;
+  } }, hints);
 }
 
 export async function wiCreate({ api, flags, cwd }) {

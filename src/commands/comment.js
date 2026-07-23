@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { findProjectConfig } from "../config.js";
+import { UsageError } from "../errors.js";
 import { htmlParagraph, stripHtml, withHelp } from "../output.js";
 import { resolveWorkItem } from "../resolve.js";
 import { projectPath, requireOne } from "./common.js";
@@ -26,7 +27,9 @@ export async function commentList(ctx) {
 export async function commentAdd(ctx) {
   const { api, flags } = ctx;
   const selected = requireOne(flags, ["body", "body-file"], "comment requires --body or --body-file");
-  const body = selected === "body" ? flags.body : await readFile(flags["body-file"], "utf8");
+  const body = selected === "body" ? flags.body : await readFile(flags["body-file"], "utf8").catch(() => {
+    throw new UsageError(`cannot read body file ${flags["body-file"]}`, "Check that the path exists and is readable");
+  });
   const { project, item } = await context(ctx);
   const created = await api.post(`${projectPath(api, project, "/work-items/")}${item.id}/comments/`, { comment_html: htmlParagraph(body) });
   return withHelp({ comment: { id: created?.id || null, work_item: `${project.identifier}-${item.sequence_id}` }, result: "added" }, [

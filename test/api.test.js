@@ -36,3 +36,28 @@ test("sends JSON with the Plane API key without exposing it in the URL", async (
   assert.equal(seen.url.includes("secret"), false);
   assert.equal(seen.init.body, '{"name":"A"}');
 });
+
+test("classifies TimeoutError as a timeout message", async () => {
+  const api = new PlaneApi(config, async () => {
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    throw error;
+  });
+  await assert.rejects(() => api.get("/x"), (error) => error.message === "Plane API request timed out");
+});
+
+test("classifies undici network failures as could-not-connect", async () => {
+  const api = new PlaneApi(config, async () => {
+    const error = new TypeError("fetch failed");
+    error.cause = new Error("ECONNREFUSED");
+    throw error;
+  });
+  await assert.rejects(() => api.get("/x"), (error) => error.message === "could not connect to the Plane API");
+});
+
+test("surfaces the real error message for non-network local failures (no network hint)", async () => {
+  const api = new PlaneApi(config, async () => {
+    throw new TypeError("Request with GET/HEAD method cannot have body.");
+  });
+  await assert.rejects(() => api.get("/x"), (error) => error.message === "Request with GET/HEAD method cannot have body." && !error.help);
+});

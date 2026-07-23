@@ -167,7 +167,12 @@ function encodeListItem(value, depth, options, lines) {
         lines.push(`${" ".repeat((depth + 2) * options.indentSize)}${fields.map((field) => encodePrimitive(item[field], options.delimiter)).join(options.delimiter)}`);
       }
     } else if (Array.isArray(firstValue)) {
-      encodeArray(firstValue, firstKey, depth, options, lines, "- ");
+      if (firstValue.every(isPrimitive)) {
+        encodeArray(firstValue, firstKey, depth, options, lines, "- ");
+      } else {
+        lines.push(`${indent}- ${arrayHeader(firstKey, firstValue.length, options.delimiter)}`);
+        for (const item of firstValue) encodeListItem(item, depth + 2, options, lines);
+      }
     } else {
       lines.push(`${indent}- ${encodeKey(firstKey)}:`);
       encodeObject(firstValue, depth + 2, options, lines);

@@ -42,8 +42,14 @@ export class PlaneApi {
         signal: AbortSignal.timeout(30_000)
       });
     } catch (error) {
-      const message = error?.name === "TimeoutError" ? "Plane API request timed out" : "could not connect to the Plane API";
-      throw new AxiError(message, { help: "Check your network connection and PLANE_BASE_URL" });
+      if (error?.name === "TimeoutError") {
+        throw new AxiError("Plane API request timed out", { help: "Check your network connection and PLANE_BASE_URL" });
+      }
+      const isNetworkFailure = (error instanceof TypeError && error.cause !== undefined) || error?.message === "fetch failed";
+      if (isNetworkFailure) {
+        throw new AxiError("could not connect to the Plane API", { help: "Check your network connection and PLANE_BASE_URL" });
+      }
+      throw new AxiError(error?.message || "unexpected error calling the Plane API");
     }
     if (response.status === 204) return null;
     const text = await response.text();

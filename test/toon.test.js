@@ -29,3 +29,8 @@ test("normalizes numbers and JavaScript host types", () => {
 test("uses no trailing newline", () => assert.equal(encode({ ok: true }).endsWith("\n"), false));
 
 test("rejects lone surrogate strings", () => assert.throws(() => encode({ bad: "\ud800" }), /lone surrogate/));
+
+test("a non-tabular array in a list item's first field indents its children beyond sibling fields", () => {
+  const result = encode({ items: [{ tags: [1, { extra: true }], name: "A" }] });
+  assert.equal(result, "items[1]:\n  - tags[2]:\n      - 1\n      - extra: true\n    name: A");
+});

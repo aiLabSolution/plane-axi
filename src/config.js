@@ -23,16 +23,24 @@ export async function findProjectConfig(start = process.cwd()) {
     const file = path.join(current, ".plane-axi.json");
     try {
       await access(file);
-      const parsed = JSON.parse(await readFile(file, "utf8"));
-      if (!parsed.project) throw new Error("missing project");
-      return { ...parsed, file };
     } catch (error) {
-      if (error.code !== "ENOENT" && !(error instanceof SyntaxError) && error.message !== "missing project") throw error;
       if (error.code !== "ENOENT") throw new UsageError(`invalid project config at ${file}`, "Run `plane-axi use <project>` to repair it");
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      current = parent;
+      continue;
     }
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
+    let parsed;
+    try {
+      parsed = JSON.parse(await readFile(file, "utf8"));
+    } catch {
+      throw new UsageError(`invalid project config at ${file}`, "Run `plane-axi use <project>` to repair it");
+    }
+    const project = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed.project : undefined;
+    if (typeof project !== "string" || !project) {
+      throw new UsageError(`invalid project config at ${file}`, "Run `plane-axi use <project>` to repair it");
+    }
+    return { ...parsed, file };
   }
 }
 

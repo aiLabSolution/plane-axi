@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { main, run } from "../src/cli.js";
+import { main, run, _internals, COMMAND_METADATA } from "../src/cli.js";
+import { AxiError } from "../src/errors.js";
 async function captureMain(args, options) {
   let stdout = "";
   const original = process.stdout.write;
@@ -53,4 +54,89 @@ test("semantic flag errors are rejected before an API call", async () => {
 test("snapshot returns no context when Plane is unavailable", async () => {
   const result = await run(["snapshot"], { config: { apiKey: undefined, workspace: undefined, baseUrl: "https://plane.test/api/v1" } });
   assert.equal(result, null);
+});
+
+test("empty-string flag values are rejected instead of silently accepted", async () => {
+  const result = await captureMain(["wi", "list", "--state", ""]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /--state requires a non-empty value/);
+});
+
+test("empty-string flag values are rejected in --flag=value form too", async () => {
+  const result = await captureMain(["wi", "list", "--state="]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /--state requires a non-empty value/);
+});
+
+test("wi update --state \"\" is a usage error, not a crash", async () => {
+  const result = await captureMain(["wi", "update", "LABS-1", "--state", ""]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /--state requires a non-empty value/);
+});
+
+test("--body allows an explicit empty value via the allowEmpty flag meta", () => {
+  const parsed = _internals.parseFlags("wi update", COMMAND_METADATA["wi update"], ["LABS-1", "--body", ""]);
+  assert.equal(parsed.flags.body, "");
+});
+
+test("--body allows an explicit empty value on wi create too", () => {
+  const parsed = _internals.parseFlags("wi create", COMMAND_METADATA["wi create"], ["--title", "T", "--body", ""]);
+  assert.equal(parsed.flags.body, "");
+});
+
+test("group --help lists group subcommands with exit 0 instead of failing", async () => {
+  const result = await captureMain(["wi", "--help"]);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /wi list/);
+  assert.match(result.stdout, /wi view/);
+});
+
+test("group --help fires even with an invalid subcommand as long as --help is present", async () => {
+  const result = await captureMain(["project", "bogus", "--help"]);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /project list/);
+});
+
+test("a bare group with no subcommand still errors normally", async () => {
+  const result = await captureMain(["wi"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /missing or unknown subcommand for wi/);
+});
+
+test("flag descriptions do not duplicate the mechanical default suffix", async () => {
+  const help = await run(["wi", "list", "--help"]);
+  const limitFlag = help.flags.find((entry) => entry.flag.startsWith("--limit"));
+  assert.equal(limitFlag.description, "Maximum rows [default: 50]");
+  const searchHelp = await run(["wi", "search", "--help"]);
+  const searchLimit = searchHelp.flags.find((entry) => entry.flag.startsWith("--limit"));
+  assert.equal(searchLimit.description, "Maximum rows [default: 50]");
+});
+
+test("setup --app/--scope descriptions do not duplicate the mechanical default suffix", async () => {
+  const help = await run(["setup", "--help"]);
+  const appFlag = help.flags.find((entry) => entry.flag.startsWith("--app"));
+  const scopeFlag = help.flags.find((entry) => entry.flag.startsWith("--scope"));
+  assert.equal(appFlag.description, "claude|codex|opencode|all [default: all]");
+  assert.equal(scopeFlag.description, "project|user [default: project]");
+});
+
+test("prototype-chain command names are rejected as unknown commands", async () => {
+  const result = await captureMain(["toString"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /unknown command toString/);
+});
+
+test("prototype-chain flag names are rejected as unknown flags", async () => {
+  const api = new Proxy({}, { get() { throw new Error("API should not be called"); } });
+  const result = await captureMain(["me", "--constructor", "x"], { api });
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /unknown flag --constructor/);
+});
+
+test("main never crashes when an error message contains a lone surrogate", async () => {
+  const api = new Proxy({}, { get() { throw new AxiError("bad \ud800 body"); } });
+  const result = await captureMain(["me"], { api });
+  assert.equal(result.status, 1);
+  assert.notEqual(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /[\ud800-\udfff]/);
 });
