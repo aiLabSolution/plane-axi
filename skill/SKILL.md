@@ -41,7 +41,7 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 ### comment
 
 - `npx -y plane-axi comment list <wi-ref> [--all]` — List comments or all activity
-- `npx -y plane-axi comment add <wi-ref> (--body <text>|--body-file <path>)` — Add a comment
+- `npx -y plane-axi comment add <wi-ref> (--body <text>|--body-file <path|->)` — Add a comment
 
 ### cycle
 
@@ -66,6 +66,10 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 ### member
 
 - `npx -y plane-axi member list` — List workspace members
+
+### render
+
+- `npx -y plane-axi render (--body <text>|--body-file <path|->)` — Render a markdown body to HTML (no network)
 
 ### api
 

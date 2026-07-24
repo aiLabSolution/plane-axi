@@ -4,5 +4,6 @@ export { wiList, wiView, wiCreate, wiUpdate, wiAssign, wiClose, wiDelete, wiSear
 export { commentList, commentAdd } from "./comment.js";
 export { stateList, labelList, memberList } from "./lists.js";
 export { rawApi } from "./raw-api.js";
+export { render } from "./render.js";
 export { setup } from "./setup.js";
 export { listNamed, viewNamed, createNamed } from "./named.js";

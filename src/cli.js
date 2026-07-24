@@ -24,12 +24,14 @@ export const COMMAND_METADATA = {
   }, [], ["plane-axi wi list", "plane-axi wi list --state completed --priority high", "plane-axi wi list --fields seq,title,assignee"]),
   "wi view": spec("Show a work item", "plane-axi wi view <ref> [--full]", commands.wiView, { project: projectFlag, full: flag("Show the complete body", { boolean: true }) }, ["ref"], ["plane-axi wi view LABS-42", "plane-axi wi view LABS-42 --full"]),
   "wi create": spec("Create a work item", "plane-axi wi create --title <title> [flags]", commands.wiCreate, {
-    project: projectFlag, title: flag("Work item title", { required: true }), body: flag("Plain-text body", { allowEmpty: true }), priority: flag("Priority enum"),
+    project: projectFlag, title: flag("Work item title", { required: true }), body: flag("Markdown body text", { allowEmpty: true }),
+    "body-file": flag("Markdown body file, or '-' for stdin"), priority: flag("Priority enum"),
     state: flag("State UUID or name"), assignee: flag("Member UUID, name, or email"), label: flag("Label UUID or name"), parent: flag("Parent work item reference")
-  }, [], ["plane-axi wi create --title \"Fix authentication\"", "plane-axi wi create --title \"Ship fix\" --priority high --state started"]),
+  }, [], ["plane-axi wi create --title \"Fix authentication\"", "plane-axi wi create --title \"Ship fix\" --priority high --state started", "plane-axi wi create --title \"PRD\" --body-file slice.md"]),
   "wi update": spec("Update a work item", "plane-axi wi update <ref> [flags]", commands.wiUpdate, {
-    project: projectFlag, title: flag("New title"), body: flag("New plain-text body", { allowEmpty: true }), priority: flag("New priority"), state: flag("New state UUID or name")
-  }, ["ref"], ["plane-axi wi update LABS-42 --priority urgent", "plane-axi wi update LABS-42 --state completed"]),
+    project: projectFlag, title: flag("New title"), body: flag("New markdown body text", { allowEmpty: true }),
+    "body-file": flag("New markdown body file, or '-' for stdin"), priority: flag("New priority"), state: flag("New state UUID or name")
+  }, ["ref"], ["plane-axi wi update LABS-42 --priority urgent", "plane-axi wi update LABS-42 --state completed", "plane-axi wi update LABS-42 --body-file slice.md"]),
   "wi assign": spec("Replace work item assignees", "plane-axi wi assign <ref> <member>...", commands.wiAssign, { project: projectFlag }, ["ref", "member..."], ["plane-axi wi assign LABS-42 alice@example.com", "plane-axi wi assign LABS-42 alice@example.com bob@example.com"]),
   "wi close": spec("Move a work item to the first completed state", "plane-axi wi close <ref>", commands.wiClose, { project: projectFlag }, ["ref"], ["plane-axi wi close LABS-42", "plane-axi wi close <uuid> --project LABS"]),
   "wi delete": spec("Delete a work item", "plane-axi wi delete <ref> --yes", commands.wiDelete, { project: projectFlag, yes: flag("Confirm deletion", { boolean: true }) }, ["ref"], ["plane-axi wi delete LABS-42 --yes", "plane-axi wi delete <uuid> --project LABS --yes"]),
@@ -37,7 +39,7 @@ export const COMMAND_METADATA = {
     limit: flag("Maximum rows", { default: "50" }), all: flag("Return all matches", { boolean: true })
   }, ["query..."], ["plane-axi wi search authentication bug", "plane-axi wi search onboarding --all"]),
   "comment list": spec("List comments or all activity", "plane-axi comment list <wi-ref> [--all]", commands.commentList, { project: projectFlag, all: flag("Include all activity", { boolean: true }) }, ["wi-ref"], ["plane-axi comment list LABS-42", "plane-axi comment list LABS-42 --all"]),
-  "comment add": spec("Add a comment", "plane-axi comment add <wi-ref> (--body <text>|--body-file <path>)", commands.commentAdd, { project: projectFlag, body: flag("Comment text"), "body-file": flag("Read comment from a file") }, ["wi-ref"], ["plane-axi comment add LABS-42 --body \"Fixed in staging\"", "plane-axi comment add LABS-42 --body-file note.md"]),
+  "comment add": spec("Add a comment", "plane-axi comment add <wi-ref> (--body <text>|--body-file <path|->)", commands.commentAdd, { project: projectFlag, body: flag("Markdown comment text"), "body-file": flag("Markdown comment file, or '-' for stdin") }, ["wi-ref"], ["plane-axi comment add LABS-42 --body \"Fixed in staging\"", "plane-axi comment add LABS-42 --body-file note.md", "cat note.md | plane-axi comment add LABS-42 --body-file -"]),
   "cycle list": spec("List project cycles", "plane-axi cycle list [--project <ref>]", commands.listNamed("cycles", "cycles"), { project: projectFlag }, [], ["plane-axi cycle list", "plane-axi cycle list --project LABS"]),
   "cycle view": spec("Show a cycle", "plane-axi cycle view <ref>", commands.viewNamed("cycles", "cycle"), { project: projectFlag }, ["ref"], ["plane-axi cycle view \"Sprint 12\"", "plane-axi cycle view <uuid> --project LABS"]),
   "cycle create": spec("Create a cycle", "plane-axi cycle create --name <name> [flags]", commands.createNamed("cycles", "cycle"), { project: projectFlag, name: flag("Cycle name", { required: true }), start: flag("Start date (YYYY-MM-DD)"), end: flag("End date (YYYY-MM-DD)") }, [], ["plane-axi cycle create --name \"Sprint 12\"", "plane-axi cycle create --name \"Sprint 12\" --start 2026-07-20 --end 2026-08-02"]),
@@ -47,6 +49,9 @@ export const COMMAND_METADATA = {
   "state list": spec("List project workflow states", "plane-axi state list [--project <ref>]", commands.stateList, { project: projectFlag }, [], ["plane-axi state list", "plane-axi state list --project LABS"]),
   "label list": spec("List project labels", "plane-axi label list [--project <ref>]", commands.labelList, { project: projectFlag }, [], ["plane-axi label list", "plane-axi label list --project LABS"]),
   "member list": spec("List workspace members", "plane-axi member list", commands.memberList, {}, [], ["plane-axi member list", "PLANE_WORKSPACE=team plane-axi member list"]),
+  "render": spec("Render a markdown body to HTML (no network)", "plane-axi render (--body <text>|--body-file <path|->)", commands.render, {
+    body: flag("Markdown body text", { allowEmpty: true }), "body-file": flag("Markdown body file, or '-' for stdin")
+  }, [], ["plane-axi render --body \"Some **bold** text\"", "plane-axi render --body-file slice.md", "cat slice.md | plane-axi render --body-file -"]),
   "api": spec("Call a Plane API path directly", "plane-axi api <METHOD> <path> [--input <json>]", commands.rawApi, { input: flag("JSON request body") }, ["METHOD", "path"], ["plane-axi api GET /users/me/", "plane-axi api POST /workspaces/example/projects/ --input '{\"name\":\"Test\"}'"]),
   "setup": spec("Install session hooks or the generated skill", "plane-axi setup [--app <app>] [--scope <scope>] [--skill]", commands.setup, {
     app: flag("claude|codex|opencode|all", { default: "all", choices: ["claude", "codex", "opencode", "all"] }),
@@ -139,7 +144,8 @@ function parseFlags(key, command, args) {
       }
       else {
         const value = equal === -1 ? args[++index] : token.slice(equal + 1);
-        if (value === undefined || (equal === -1 && value.startsWith("-"))) throw new UsageError(`--${name} requires a value`, `Run \`plane-axi ${key} --help\``);
+        // A bare "-" is the conventional stdin marker (e.g. --body-file -), not a flag.
+        if (value === undefined || (equal === -1 && value.startsWith("-") && value !== "-")) throw new UsageError(`--${name} requires a value`, `Run \`plane-axi ${key} --help\``);
         if (value === "" && !meta.allowEmpty) throw new UsageError(`--${name} requires a non-empty value`, `Run \`plane-axi ${key} --help\``);
         if (meta.choices && !meta.choices.includes(value)) throw new UsageError(`invalid --${name} value ${value}`, `Use one of: ${meta.choices.join(", ")}`);
         flags[name] = value;
@@ -173,7 +179,8 @@ export async function run(args, options = {}) {
 export async function main(args, options = {}) {
   try {
     const result = await run(args, options);
-    if (result !== null && result !== undefined) emit(result);
+    if (typeof result === "string") process.stdout.write(`${result}\n`);
+    else if (result !== null && result !== undefined) emit(result);
     return 0;
   } catch (error) {
     const translated = error instanceof AxiError ? error : new AxiError(error?.message || "unexpected error");

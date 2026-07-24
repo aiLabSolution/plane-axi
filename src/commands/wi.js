@@ -1,11 +1,21 @@
 import { findProjectConfig, selectedProject } from "../config.js";
 import { AxiError, UsageError } from "../errors.js";
-import { htmlParagraph, stripHtml, truncate, withHelp } from "../output.js";
+import { mdToHtml } from "../markdown.js";
+import { stripHtml, truncate, withHelp } from "../output.js";
 import { resolveNamed, resolveProject, resolveWorkItem } from "../resolve.js";
-import { projectPath } from "./common.js";
+import { atMostOne, projectPath, readBody } from "./common.js";
 
 const PRIORITIES = new Set(["urgent", "high", "medium", "low", "none"]);
 const FIELD_NAMES = new Set(["id", "seq", "title", "state", "priority", "assignee", "labels", "created_at", "updated_at"]);
+// Trims the work-item payload to exactly what compactItem/FIELD_NAMES can render, plus
+// expand=state so stateObject gets a dict instead of a bare uuid. Plane honors ?fields=
+// even though it ignores filter params, and full-list scans were blowing the per-token
+// rate budget (see planelib.py's LIST_FIELDS).
+const LIST_FIELDS = "id,sequence_id,name,priority,state,assignees,labels,created_at,updated_at";
+const LIST_QUERY = { fields: LIST_FIELDS, expand: "state" };
+// Search's per-project fallback scan only ever reads name + description_html (see
+// searchItems below), so nothing else is worth the extra payload.
+const SEARCH_QUERY = { fields: "id,sequence_id,name,description_html" };
 
 async function optionalProject(flags, cwd) {
   if (flags.project) return flags.project;
@@ -96,7 +106,7 @@ export async function wiList({ api, flags, cwd }) {
   const member = flags.assignee ? await resolveMember(api, flags.assignee) : null;
   const path = projectPath(api, project, "/work-items/");
   const needsAll = flags.all || flags.state || flags.priority || flags.assignee || limit > 100;
-  const response = needsAll ? await api.all(path) : await api.page(path);
+  const response = needsAll ? await api.all(path, LIST_QUERY) : await api.page(path, LIST_QUERY);
   let items = response.results;
   if (flags.state) {
     const lower = flags.state.toLowerCase();
@@ -125,7 +135,9 @@ export async function wiList({ api, flags, cwd }) {
 export async function wiView(ctx) {
   const { api, flags } = ctx;
   const { project, item: summary } = await workItemContext(ctx);
-  const item = await api.get(`${projectPath(api, project, "/work-items/")}${summary.id}/`);
+  // A readable-cache hit already returned the full item (direct GET, not a trimmed
+  // scan) — description_html is present, so skip the redundant detail GET.
+  const item = "description_html" in summary ? summary : await api.get(`${projectPath(api, project, "/work-items/")}${summary.id}/`);
   const states = await statesFor(api, project);
   const state = stateObject(item, new Map(states.map((entry) => [entry.id, entry])));
   const body = stripHtml(item.description_html || item.description || "");
@@ -149,9 +161,14 @@ export async function wiView(ctx) {
 
 export async function wiCreate({ api, flags, cwd }) {
   const priority = checkPriority(flags.priority);
+  const bodySource = atMostOne(flags, ["body", "body-file"], "create accepts at most one of --body or --body-file");
   const project = await resolveProject(api, await selectedProject(flags, cwd));
   const data = { name: flags.title };
-  if (flags.body !== undefined) data.description_html = htmlParagraph(flags.body);
+  if (bodySource) {
+    const raw = bodySource === "body" ? flags.body : await readBody(flags["body-file"]);
+    const trimmed = raw.trim();
+    if (trimmed) data.description_html = mdToHtml(trimmed);
+  }
   if (priority) data.priority = priority;
   if (flags.state) data.state = (await resolveState(api, project, flags.state)).id;
   if (flags.assignee) {
@@ -169,13 +186,17 @@ export async function wiCreate({ api, flags, cwd }) {
 export async function wiUpdate(ctx) {
   const { api, flags } = ctx;
   const priority = flags.priority !== undefined ? checkPriority(flags.priority) : undefined;
+  const bodySource = atMostOne(flags, ["body", "body-file"], "update accepts at most one of --body or --body-file");
   const { project, item } = await workItemContext(ctx);
   const data = {};
   if (flags.title !== undefined) data.name = flags.title;
-  if (flags.body !== undefined) data.description_html = htmlParagraph(flags.body);
+  if (bodySource) {
+    const raw = bodySource === "body" ? flags.body : await readBody(flags["body-file"]);
+    data.description_html = mdToHtml(raw.trim()); // "" is an explicit clear (preserves the allowEmpty fix)
+  }
   if (flags.priority !== undefined) data.priority = priority;
   if (flags.state !== undefined) data.state = (await resolveState(api, project, flags.state)).id;
-  if (!Object.keys(data).length) throw new UsageError("nothing to update", "Pass at least one of --title, --body, --priority, or --state");
+  if (!Object.keys(data).length) throw new UsageError("nothing to update", "Pass at least one of --title, --body, --body-file, --priority, or --state");
   const updated = await api.patch(`${projectPath(api, project, "/work-items/")}${item.id}/`, data);
   return withHelp({ work_item: { id: updated.id, seq: `${project.identifier}-${updated.sequence_id}`, title: updated.name }, result: "updated" }, [
     `Run \`plane-axi wi view ${project.identifier}-${updated.sequence_id}\` for details`
@@ -233,7 +254,7 @@ export async function wiSearch({ api, flags, positionals }) {
     const projects = (await api.all(api.workspacePath("/projects/"))).results;
     const lower = query.toLowerCase();
     for (const project of projects) {
-      const projectItems = (await api.all(projectPath(api, project, "/work-items/"))).results;
+      const projectItems = (await api.all(projectPath(api, project, "/work-items/"), SEARCH_QUERY)).results;
       items.push(...projectItems.filter((item) => `${item.name || ""}\n${stripHtml(item.description_html || item.description || "")}`.toLowerCase().includes(lower)).map((item) => ({ ...item, project_identifier: project.identifier })));
     }
   }
