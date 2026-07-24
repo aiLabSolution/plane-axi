@@ -29,6 +29,20 @@ test("stripHtml still renders <li> tags with attributes as bullets", () => {
   assert.equal(stripHtml('<ul><li class="x">A</li><li id="y">B</li></ul>'), "- A\n- B");
 });
 
+test("stripHtml removes an unterminated trailing tag so no <script fragment survives", () => {
+  assert.equal(stripHtml("Read the <script"), "Read the");
+  assert.equal(stripHtml("<p>ok</p><script src=evil"), "ok");
+  assert.doesNotMatch(stripHtml("hi <img src=x onerror=alert(1)"), /</);
+});
+
+test("stripHtml keeps stripping when tag removal would otherwise reconstruct a tag", () => {
+  assert.doesNotMatch(stripHtml("<scr<span>ipt>x</scr<span>ipt>"), /<script/i);
+});
+
+test("stripHtml preserves legitimately escaped angle brackets as literal text", () => {
+  assert.equal(stripHtml("<p>use &lt;script&gt; carefully</p>"), "use <script> carefully");
+});
+
 test("truncate backs the cut off by one unit when a surrogate pair straddles the limit", () => {
   const text = `${"a".repeat(999)}\u{1F600}${"b".repeat(50)}`;
   const result = truncate(text, 1000);

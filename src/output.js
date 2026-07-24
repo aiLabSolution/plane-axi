@@ -31,12 +31,25 @@ export function withHelp(payload, hints = []) {
 
 const BLOCK_CLOSERS = /<\/(?:p|li|h[1-6]|div|blockquote|tr|ul|ol|pre)\s*>/gi;
 
+// Remove every HTML tag. Applied to a fixpoint (a removal can splice two fragments into a
+// fresh tag) and then trailing unterminated tags (`<script` with no closing `>`, which a
+// single `<[^>]+>` pass leaves behind) are dropped — so no `<tag` fragment ever survives.
+// Runs before entity-decoding, so legitimately escaped `&lt;`/`&gt;` text is untouched.
+function stripTags(text) {
+  let out = String(text);
+  let previous;
+  do {
+    previous = out;
+    out = out.replace(/<[^>]+>/g, "");
+  } while (out !== previous);
+  return out.replace(/<[^>]*$/, "");
+}
+
 export function stripHtml(html = "") {
-  return String(html)
+  return stripTags(String(html)
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<li(?:\s[^>]*)?>/gi, "- ")
-    .replace(BLOCK_CLOSERS, "\n")
-    .replace(/<[^>]+>/g, "")
+    .replace(BLOCK_CLOSERS, "\n"))
     .replace(/&nbsp;/gi, " ")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
