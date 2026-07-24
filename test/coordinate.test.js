@@ -188,3 +188,47 @@ test("ledger task quotes are curly-quoted so the single-quoted form round-trips"
 test("isoUtc emits seconds precision with an explicit +00:00 offset", () => {
   assert.equal(_internals.isoUtc(new Date("2026-07-24T14:30:00.123Z")), "2026-07-24T14:30:00+00:00");
 });
+
+test("release --keep-assignee drops the claim but stays assigned", async () => {
+  const { api, record } = makeApi({ items: [itemFix()] });
+  const out = await release({ api, flags: { agent: "me-id", "keep-assignee": true }, positionals: ["LABS-42"], cwd: "/tmp" });
+  assert.equal(out.assignee, "kept (by request)");
+  assert.equal(record.patches.length, 0, "must not touch assignees when keeping them");
+});
+
+test("claim --force proceeds even when a rival's earlier claim surfaces post-write", async () => {
+  const rival = ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00");
+  const mine = ledger("me-id", "CLAIM", FUTURE, "mine", "2026-07-24T10:00:05+00:00");
+  const { api, record } = makeApi({ items: [itemFix()], commentSnapshots: [[], [rival, mine]] });
+  const out = await claim({ api, flags: { task: "mine", agent: "me-id", force: true }, positionals: ["LABS-42"], cwd: "/tmp" });
+  assert.equal(out.result, "claimed");
+  assert.deepEqual(record.patches.at(-1).data.assignees, ["me-id"], "assigns rather than withdrawing under --force");
+  assert.ok(!record.posts.some((p) => /LABS-RELEASE/.test(p.data.comment_html)), "must not withdraw under --force");
+});
+
+test("claim backs off when its own record has not surfaced on re-read (mineAt=Infinity)", async () => {
+  // Post-write snapshot has a live rival but NOT my own claim yet -> mineAt=Infinity -> withdraw.
+  const rival = ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:09+00:00");
+  const { api, record } = makeApi({ items: [itemFix()], commentSnapshots: [[], [rival]] });
+  await assert.rejects(
+    () => claim({ api, flags: { task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
+    (e) => e.exitCode === 3 && /LOST RACE/.test(e.message)
+  );
+  assert.equal(record.patches.length, 0);
+});
+
+test("next sorts unstaged items after every staged one", async () => {
+  const items = [
+    itemFix({ id: "u", sequence_id: 20, name: "no stage prefix", state: "st-ready", priority: "urgent" }),
+    itemFix({ id: "s", sequence_id: 21, name: "[S3.1] staged low", state: "st-ready", priority: "low" })
+  ];
+  const { api } = makeApi({ items });
+  const out = await nextSlice({ api, flags: { project: "LABS" }, positionals: [], cwd: "/tmp" });
+  assert.deepEqual(out.next.map((s) => s.seq), ["LABS-21", "LABS-20"], "staged (rank 3) beats unstaged (rank 98) despite lower priority");
+  assert.equal(out.next[1].stage, "");
+});
+
+test("parseMs treats an offset-less until stamp as UTC, not local time", () => {
+  assert.equal(_internals.parseMs("2026-07-24T14:30:00"), Date.parse("2026-07-24T14:30:00Z"));
+  assert.equal(_internals.parseMs("2026-07-24T14:30:00+02:00"), Date.parse("2026-07-24T14:30:00+02:00"));
+});

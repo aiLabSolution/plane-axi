@@ -8,8 +8,10 @@
 //   * fine / same-item    : an append-only ledger in the comments —
 //     `<IDENT>-CLAIM|HEARTBEAT|RELEASE v1 agent=<id> task='<...>' until=<ISO>` — with a TTL,
 //     so `status` reduces the comment tail to "who holds what, and is it still alive".
-// The ledger tag is the *project identifier* (e.g. `LIS`), so the lines plane-axi writes are
-// byte-identical to slice.py's and the two read each other's records during a migration.
+// The ledger tag is the *project identifier* (e.g. `LIS`), so the lines plane-axi writes carry
+// the exact `<IDENT>-CLAIM v1 …` shape slice.py's reader expects and the two read each other's
+// records during a migration. plane-axi additionally HTML-escapes the line for a valid comment
+// body (slice.py posts it raw); the decoded text still round-trips through the same ledger regex.
 //
 // `claim` writes its ledger record first, then re-reads: if a rival's live claim carries an
 // earlier timestamp we withdraw (first-writer-wins settles the claim/claim race). `release`
@@ -63,8 +65,16 @@ function isoUtc(date) {
   return `${date.toISOString().slice(0, 19)}+00:00`;
 }
 
+function parseMs(value) {
+  if (!value) return NaN;
+  // A bare (offset-less) stamp is UTC — matching slice.py's _ts/_read_claims, which force
+  // tzinfo=UTC on naive stamps. Without this JS reads "…T14:30:00" as local time.
+  const normalized = /[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value}Z`;
+  return Date.parse(normalized);
+}
+
 function tsMs(value) {
-  const ms = Date.parse(value || "");
+  const ms = parseMs(value);
   return Number.isNaN(ms) ? 0 : ms; // unparseable sorts first, mirroring slice.py's datetime.min
 }
 
@@ -145,7 +155,7 @@ async function readClaims(api, project, itemId) {
   const live = {};
   for (const [agent, claim] of Object.entries(latest)) {
     if (claim.verb === "RELEASE") continue;
-    const parsed = claim.until ? Date.parse(claim.until) : NaN;
+    const parsed = claim.until ? parseMs(claim.until) : NaN;
     const active = claim.until ? (Number.isNaN(parsed) ? true : parsed > now) : true;
     live[agent] = { ...claim, active };
   }
@@ -282,4 +292,4 @@ export async function nextSlice({ api, flags, cwd }) {
   return withHelp({ count: `${slices.length} ready`, project: project.identifier, next: slices }, [`Claim one: plane-axi claim ${slices[0].seq} --task "..."`]);
 }
 
-export const _internals = { agentId, stageOf, isoUtc, ledgerRe, encodeTask, escapeHtml, readClaims, ttlMinutes };
+export const _internals = { agentId, stageOf, isoUtc, parseMs, ledgerRe, encodeTask, escapeHtml, readClaims, ttlMinutes };
