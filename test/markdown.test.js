@@ -136,8 +136,10 @@ test("blocks heading breaks paragraph", () => {
 });
 
 test("blocks no raw html injection", () => {
-  // a literal <script> in body text must be escaped, never emitted as a tag
-  assert.doesNotMatch(mdToHtml("<script>alert(1)</script>"), /<script>/);
+  // a literal <script> in body text must be escaped, never emitted as a tag: assert the exact
+  // escaped output rather than the absence of one substring (a stronger check, and no filtering
+  // regex for CodeQL's js/bad-tag-filter to mistake for a sanitizer).
+  assert.equal(mdToHtml("<script>alert(1)</script>"), "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
 });
 
 // --------------------------------------------------------------------------- TestPrdTemplate
