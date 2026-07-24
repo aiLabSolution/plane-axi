@@ -71,6 +71,26 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 
 - `npx -y plane-axi render (--body <text>|--body-file <path|->)` — Render a markdown body to HTML (no network)
 
+### next
+
+- `npx -y plane-axi next [--stage <s>] [--ready-state <name>]` — List ready ∧ unclaimed work items, stage-ordered
+
+### claim
+
+- `npx -y plane-axi claim <ref> [--task <t>] [--ttl <min>] [--start]` — Claim a work item (TTL'd advisory lock) and flag it taken
+
+### status
+
+- `npx -y plane-axi status <ref>` — Show claim ownership of a work item
+
+### heartbeat
+
+- `npx -y plane-axi heartbeat <ref> [--ttl <min>]` — Extend your claim's TTL (task carries over)
+
+### release
+
+- `npx -y plane-axi release <ref>` — Release your claim (unassign if no other live claim remains)
+
 ### api
 
 - `npx -y plane-axi api <METHOD> <path> [--input <json>]` — Call a Plane API path directly
