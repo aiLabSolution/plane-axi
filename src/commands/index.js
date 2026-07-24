@@ -3,6 +3,7 @@ export { projectList, projectView, projectCreate, useProject } from "./project.j
 export { wiList, wiView, wiCreate, wiUpdate, wiAssign, wiClose, wiDelete, wiSearch } from "./wi.js";
 export { commentList, commentAdd } from "./comment.js";
 export { stateList, labelList, memberList } from "./lists.js";
+export { claim, heartbeat, release, claimStatus, nextSlice } from "./coordinate.js";
 export { rawApi } from "./raw-api.js";
 export { render } from "./render.js";
 export { setup } from "./setup.js";

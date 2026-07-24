@@ -58,6 +58,24 @@ plane-axi member list
 
 References accept UUIDs, project identifiers or exact names, and readable work-item IDs such as `LABS-42`. Run any command with `--help` for its complete flags and examples. Unknown flags fail before any API call with exit code 2 and an inline list of valid flags.
 
+## Multi-agent coordination
+
+When several agent sessions share one Plane token, `claim` puts a TTL'd advisory lock on a work item so they don't collide, and `next` picks the earliest startable item.
+
+```sh
+plane-axi next                                   # ready-for-agent ∧ unassigned, stage-ordered
+plane-axi next --stage S2 --limit 5
+plane-axi claim LABS-42 --task "auth thread"     # assign self + post a TTL'd claim record
+plane-axi claim LABS-42 --task "..." --start     # …and transition to "In Progress"
+plane-axi status LABS-42                          # who holds the item, and is the claim still live
+plane-axi heartbeat LABS-42                        # extend my claim's TTL before it lapses
+plane-axi release LABS-42                          # drop my claim (unassign if no other live claim)
+```
+
+Two layers back this. The coarse flag is the item's **assignee** — `next` hides assigned items, `claim` assigns, `release` unassigns. The fine record is an append-only **ledger** in the comments (`<IDENTIFIER>-CLAIM|HEARTBEAT|RELEASE v1 agent=<id> task='<...>' until=<ISO>`) that carries a TTL, so `status` reduces the comment tail to current ownership without eyeballing timestamps. `claim` writes its ledger record first, then re-reads: if a rival's live claim carries an earlier timestamp it withdraws (first-writer-wins settles a claim/claim race) and exits `3`; `--force` claims a shared item anyway (then partition by sub-item). A claim past its `until` is ignored, so an abandoned lock is automatically reclaimable.
+
+`next`/`claim` default to the `ready-for-agent` state (override with `--ready-state`) and read an optional `[S<n>.<m>]` stage prefix from the title for ordering; items without one sort last. Agent identity comes from `--agent`, else `$PLANE_AGENT_ID`/session-id env, else `host:pid`. TTL defaults to 90 minutes (`--ttl`).
+
 ## Markdown bodies
 
 `wi create`, `wi update`, and `comment add` render their body through a small, dependency-free markdown-to-HTML pass before sending it as `description_html` / `comment_html`. Coverage matches a PRD/slice-note template: ATX headings, `-`/`*`/`+` and `1.` lists with one level of nesting, `[ ]`/`[x]` task items, fenced ` ``` ` code blocks, blockquotes, `---` rules, blank-line paragraphs, and inline `**bold**`, `` `code` ``, and `[text](url)` links (`http(s)`/`mailto`, plus root-relative `/…`, anchor `#…`, and dot-relative `./…`/`../…` targets only — everything else, including bare path-relative links like `docs/guide.md`, `javascript:`, and protocol-relative `//host` links, renders as literal text). One caveat within a nesting level: mixing marker types among a parent's nested children (a `-` child then a `1.` child under the same item) renders them all as one list of the last child's type. Plain text with no markdown still renders to a single `<p>` exactly as before.

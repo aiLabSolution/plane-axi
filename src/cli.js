@@ -52,6 +52,23 @@ export const COMMAND_METADATA = {
   "render": spec("Render a markdown body to HTML (no network)", "plane-axi render (--body <text>|--body-file <path|->)", commands.render, {
     body: flag("Markdown body text", { allowEmpty: true }), "body-file": flag("Markdown body file, or '-' for stdin")
   }, [], ["plane-axi render --body \"Some **bold** text\"", "plane-axi render --body-file slice.md", "cat slice.md | plane-axi render --body-file -"]),
+  "next": spec("List ready ∧ unclaimed work items, stage-ordered", "plane-axi next [--stage <s>] [--ready-state <name>]", commands.nextSlice, {
+    project: projectFlag, stage: flag("Restrict to a stage, e.g. S2"), "ready-state": flag("Ready state name", { default: "ready-for-agent" }),
+    "include-claimed": flag("Also show assigned items", { boolean: true }), limit: flag("Cap the number shown")
+  }, [], ["plane-axi next", "plane-axi next --stage S2", "plane-axi next --limit 5"]),
+  "claim": spec("Claim a work item (TTL'd advisory lock) and flag it taken", "plane-axi claim <ref> [--task <t>] [--ttl <min>] [--start]", commands.claim, {
+    project: projectFlag, task: flag("Sub-task / files this claim covers"), ttl: flag("Claim lifetime in minutes", { default: "90" }),
+    agent: flag("Agent identity (default: session id / host:pid)"), force: flag("Claim even if another agent holds a live claim (shared item)", { boolean: true }),
+    start: flag("Also transition the item to 'In Progress'", { boolean: true }), "start-state": flag("Transition to this state instead of 'In Progress' (implies --start)"),
+    "ready-state": flag("Expected ready state name", { default: "ready-for-agent" })
+  }, ["ref"], ["plane-axi claim LABS-42 --task \"auth thread\"", "plane-axi claim LABS-42 --task \"...\" --start"]),
+  "status": spec("Show claim ownership of a work item", "plane-axi status <ref>", commands.claimStatus, { project: projectFlag }, ["ref"], ["plane-axi status LABS-42"]),
+  "heartbeat": spec("Extend your claim's TTL (task carries over)", "plane-axi heartbeat <ref> [--ttl <min>]", commands.heartbeat, {
+    project: projectFlag, ttl: flag("Claim lifetime in minutes", { default: "90" }), agent: flag("Agent identity (default: session id / host:pid)")
+  }, ["ref"], ["plane-axi heartbeat LABS-42", "plane-axi heartbeat LABS-42 --ttl 120"]),
+  "release": spec("Release your claim (unassign if no other live claim remains)", "plane-axi release <ref>", commands.release, {
+    project: projectFlag, agent: flag("Agent identity (default: session id / host:pid)"), "keep-assignee": flag("Release the claim but stay assigned", { boolean: true })
+  }, ["ref"], ["plane-axi release LABS-42", "plane-axi release LABS-42 --keep-assignee"]),
   "api": spec("Call a Plane API path directly", "plane-axi api <METHOD> <path> [--input <json>]", commands.rawApi, { input: flag("JSON request body") }, ["METHOD", "path"], ["plane-axi api GET /users/me/", "plane-axi api POST /workspaces/example/projects/ --input '{\"name\":\"Test\"}'"]),
   "setup": spec("Install session hooks or the generated skill", "plane-axi setup [--app <app>] [--scope <scope>] [--skill]", commands.setup, {
     app: flag("claude|codex|opencode|all", { default: "all", choices: ["claude", "codex", "opencode", "all"] }),
