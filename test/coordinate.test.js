@@ -228,6 +228,61 @@ test("next sorts unstaged items after every staged one", async () => {
   assert.equal(out.next[1].stage, "");
 });
 
+// Regression: CLAIM_TAIL used to slice the RAW comment tail before the ledger filter, so
+// ordinary discussion evicted the records proving ownership. The boundary was exact — 39
+// newer non-ledger comments kept the holder visible, 40 made it vanish.
+function chatter(count, from = 0) {
+  return Array.from({ length: count }, (_, i) => ({
+    created_at: `2026-07-24T12:${String(from + i).padStart(2, "0")}:00+00:00`,
+    comment_stripped: `ordinary discussion ${from + i}`
+  }));
+}
+
+test("a live claim stays visible under more than CLAIM_TAIL newer non-ledger comments", async () => {
+  const held = ledger("holder", "CLAIM", FUTURE, "real work", "2026-07-24T10:00:00+00:00");
+  for (const noise of [0, 39, 40, 45, 120]) {
+    const { api } = makeApi({ items: [itemFix()], comments: [held, ...chatter(noise)] });
+    const out = await claimStatus({ api, flags: {}, positionals: ["LABS-42"], cwd: "/tmp" });
+    assert.notEqual(out.claims, "none", `holder vanished under ${noise} non-ledger comments`);
+    assert.equal(out.claims.find((c) => c.agent === "holder")?.status, "active", `holder not active under ${noise} non-ledger comments`);
+  }
+});
+
+test("claim is still CONTENDED when chatter buries the rival's ledger line", async () => {
+  const rival = ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00");
+  const { api, record } = makeApi({ items: [itemFix()], comments: [rival, ...chatter(60)] });
+  await assert.rejects(
+    () => claim({ api, flags: { task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
+    (e) => e.exitCode === 3 && /CONTENDED/.test(e.message)
+  );
+  assert.equal(record.patches.length, 0, "must not stomp the buried holder's assignee");
+});
+
+test("readClaims keeps the newest CLAIM_TAIL ledger rows when ledger rows exceed the cap", async () => {
+  // 45 agents, each with one CLAIM: only the newest 40 stay authoritative.
+  const rows = Array.from({ length: 45 }, (_, i) =>
+    ledger(`agent${String(i).padStart(2, "0")}`, "CLAIM", FUTURE, "t", `2026-07-24T13:${String(i).padStart(2, "0")}:00+00:00`));
+  const { api } = makeApi({ items: [itemFix()], comments: rows });
+  const live = await _internals.readClaims(api, PROJECT, "i42");
+  assert.equal(Object.keys(live).length, 40, "authority window is still bounded at CLAIM_TAIL");
+  assert.ok(live.agent44, "newest ledger row survives");
+  assert.ok(!live.agent04, "oldest ledger row beyond the cap is dropped");
+});
+
+test("next reports the matching total, not the truncated count, and hints the escape hatch", async () => {
+  const items = Array.from({ length: 19 }, (_, i) =>
+    itemFix({ id: `n${i}`, sequence_id: 100 + i, name: `[S2.${i}] slice ${i}`, state: "st-ready", assignees: [] }));
+  const { api } = makeApi({ items });
+  const capped = await nextSlice({ api, flags: { project: "LABS", limit: "5" }, positionals: [], cwd: "/tmp" });
+  assert.equal(capped.next.length, 5);
+  assert.equal(capped.count, "5 of 19 ready", "count must not be derived from the truncated array");
+  assert.ok(capped.help.some((h) => /all 19 ready slices/.test(h)), "truncation needs an escape-hatch hint");
+  assert.ok(capped.help.some((h) => /^Claim one:/.test(h)), "the actionable claim hint survives truncation");
+  const full = await nextSlice({ api, flags: { project: "LABS" }, positionals: [], cwd: "/tmp" });
+  assert.equal(full.count, "19 ready", "untruncated output keeps the bare count");
+  assert.equal(full.help.length, 1, "no escape-hatch hint when nothing is hidden");
+});
+
 test("parseMs treats an offset-less until stamp as UTC, not local time", () => {
   assert.equal(_internals.parseMs("2026-07-24T14:30:00"), Date.parse("2026-07-24T14:30:00Z"));
   assert.equal(_internals.parseMs("2026-07-24T14:30:00+02:00"), Date.parse("2026-07-24T14:30:00+02:00"));
