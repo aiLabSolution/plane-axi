@@ -1,11 +1,10 @@
-import { createRequire } from "node:module";
 import { AxiError } from "./errors.js";
 import { assertCredentials, envConfig } from "./config.js";
+import { PACKAGE_VERSION } from "./version.js";
 
-// Read the package version once at module load (no per-request JSON.parse churn); some
-// Cloudflare-fronted Plane instances filter unrecognised User-Agents, so PLANE_USER_AGENT
-// lets an operator override this to a known-safe value (e.g. "plane-cli/1.0") per request.
-const PACKAGE_VERSION = createRequire(import.meta.url)("../package.json").version;
+// Some Cloudflare-fronted Plane instances filter unrecognised User-Agents, so
+// PLANE_USER_AGENT lets an operator override this to a known-safe value
+// (e.g. "plane-cli/1.0") per request.
 const DEFAULT_USER_AGENT = `plane-axi/${PACKAGE_VERSION}`;
 
 function messageFromBody(body) {

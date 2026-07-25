@@ -1,4 +1,4 @@
-export { home, me, snapshot } from "./home.js";
+export { home, me, snapshot, version } from "./home.js";
 export { projectList, projectView, projectCreate, useProject } from "./project.js";
 export { wiList, wiView, wiCreate, wiUpdate, wiAssign, wiClose, wiDelete, wiSearch } from "./wi.js";
 export { commentList, commentAdd } from "./comment.js";

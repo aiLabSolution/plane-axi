@@ -4,11 +4,11 @@
   "description": "Agent-first Plane.so CLI with compact TOON output",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ailabsolution/plane-axi.git"
+    "url": "git+https://github.com/aiLabSolution/plane-axi.git"
   },
-  "homepage": "https://github.com/ailabsolution/plane-axi#readme",
+  "homepage": "https://github.com/aiLabSolution/plane-axi#readme",
   "bugs": {
-    "url": "https://github.com/ailabsolution/plane-axi/issues"
+    "url": "https://github.com/aiLabSolution/plane-axi/issues"
   },
   "type": "module",
   "bin": {
@@ -19,7 +19,8 @@
     "src",
     "scripts",
     "skill",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=18"

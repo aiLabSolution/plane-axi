@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 import { main, run, _internals, COMMAND_METADATA } from "../src/cli.js";
 import { AxiError } from "../src/errors.js";
+import { PACKAGE_VERSION } from "../src/version.js";
 async function captureMain(args, options) {
   let stdout = "";
   const original = process.stdout.write;
@@ -159,4 +162,39 @@ test("main never crashes when an error message contains a lone surrogate", async
   assert.equal(result.status, 1);
   assert.notEqual(result.stdout, "");
   assert.doesNotMatch(result.stdout, /[\ud800-\udfff]/);
+});
+
+test("version reports the running build without calling the API", async () => {
+  const api = new Proxy({}, { get() { throw new Error("API should not be called"); } });
+  const result = await run(["version"], { api, executable: "/opt/bin/plane-axi" });
+  assert.equal(result.version, PACKAGE_VERSION);
+  assert.equal(result.bin, "/opt/bin/plane-axi");
+  assert.equal(result.node, process.version);
+});
+
+test("--version and -v resolve to the version command", async () => {
+  for (const token of ["--version", "-v"]) {
+    const api = new Proxy({}, { get() { throw new Error("API should not be called"); } });
+    const result = await run([token], { api, executable: "/opt/bin/plane-axi" });
+    assert.equal(result.version, PACKAGE_VERSION, `${token} should report the package version`);
+  }
+});
+
+// The whole point of `version` is diagnosing which copy is on PATH, so it has to answer
+// before credentials are configured — otherwise a stale install cannot be identified.
+test("version answers with no credentials configured", async () => {
+  const result = await captureMain(["version"], { config: { apiKey: undefined, workspace: undefined, baseUrl: "https://plane.test/api/v1" } });
+  assert.equal(result.status, 0);
+  assert.ok(result.stdout.includes(`version: ${PACKAGE_VERSION}`), `expected the reported version, got: ${result.stdout}`);
+});
+
+test("version collapses the home directory in the reported bin path", async () => {
+  const result = await run(["version"], { executable: path.join(os.homedir(), ".local", "bin", "plane-axi") });
+  assert.equal(result.bin, "~/.local/bin/plane-axi");
+});
+
+test("version is listed in top-level help so agents can discover it", async () => {
+  const help = await run(["--help"]);
+  assert.ok(help.commands.some((entry) => entry.command === "version"));
+  assert.ok(Object.hasOwn(COMMAND_METADATA, "version"));
 });

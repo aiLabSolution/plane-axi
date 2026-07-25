@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aiLabSolution/plane-axi/actions/workflows/ci.yml/badge.svg)](https://github.com/aiLabSolution/plane-axi/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/aiLabSolution/plane-axi/actions/workflows/codeql.yml/badge.svg)](https://github.com/aiLabSolution/plane-axi/actions/workflows/codeql.yml)
-[![npm](https://img.shields.io/npm/v/plane-axi)](https://www.npmjs.com/package/plane-axi)
+[![Release](https://img.shields.io/github/v/release/aiLabSolution/plane-axi?sort=semver)](https://github.com/aiLabSolution/plane-axi/releases/latest)
 
 An agent-first CLI for [Plane.so](https://plane.so): compact TOON output, strict non-interactive commands, directory-scoped project context, structured errors, session hooks, and an installable Agent Skill.
 
@@ -12,8 +12,10 @@ An agent-first CLI for [Plane.so](https://plane.so): compact TOON output, strict
 
 ## Run it
 
+`plane-axi` is distributed from GitHub, not the npm registry:
+
 ```sh
-npm install -g plane-axi
+npm install -g github:aiLabSolution/plane-axi
 export PLANE_API_KEY="<personal-access-token>"
 export PLANE_WORKSPACE="<workspace-slug>"
 plane-axi
@@ -22,7 +24,14 @@ plane-axi
 Or run it without a global install:
 
 ```sh
-npx -y plane-axi
+npx -y github:aiLabSolution/plane-axi
+```
+
+Check which build is actually on your PATH — `bin` is what distinguishes a stale global
+install from a fresh one when both report the same version:
+
+```sh
+plane-axi version
 ```
 
 `PLANE_WORKSPACE_SLUG` is accepted as an alias. Self-hosted or alternate API hosts can set `PLANE_BASE_URL`; both `https://host` and `https://host/api/v1` forms work.
@@ -152,3 +161,32 @@ npm run skill:check
 ```
 
 The implementation is ESM and has zero runtime dependencies.
+
+## Releasing
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please).
+Nothing is released by hand — version numbers, `CHANGELOG.md`, tags, and GitHub Releases all
+come from the commit history.
+
+1. Land work on `main` using [Conventional Commits](https://www.conventionalcommits.org).
+   `fix:` bumps the patch, `feat:` bumps the minor, and other types (`chore:`, `docs:`,
+   `ci:`, `refactor:`) do not trigger a release on their own.
+2. `.github/workflows/release.yml` opens or updates a **release PR** that bumps
+   `package.json` and writes the changelog entry. It accumulates until you merge it.
+3. Merging that PR tags the commit, publishes the GitHub Release, and attaches the
+   `npm pack` tarball. Before the release stands, the workflow re-runs the tests and
+   asserts the tag, `package.json`, and `plane-axi version` all report the same version.
+
+To force a specific version, run the **Release** workflow manually with a `release-as`
+input, or add a `Release-As: <version>` footer to a commit on `main`.
+
+Because this project is pre-1.0, `bump-minor-pre-major` is set: a breaking change bumps the
+minor rather than going to 1.0.0.
+
+### One-time setup for unattended releases
+
+`main` requires the `test` check, and GitHub does not start workflows for events authored by
+`GITHUB_TOKEN` — so by default CI never runs on the release PR and it cannot merge on its
+own. To close that gap, add a repository secret named `RELEASE_PLEASE_TOKEN` holding a
+fine-grained PAT (or GitHub App token) with **contents: write** and **pull requests: write**.
+Without it everything still works, but a maintainer has to merge the release PR manually.
