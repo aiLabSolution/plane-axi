@@ -141,11 +141,22 @@ async function postLedger(api, project, itemId, verb, agent, task, until) {
 // Reduce the ledger comment tail to current, still-live ownership per agent.
 async function readClaims(api, project, itemId) {
   const { results } = await api.all(`${itemUrl(api, project, itemId)}comments/`, { fields: "created_at,comment_stripped,comment_html" });
-  const rows = results.slice().sort((a, b) => tsMs(a.created_at) - tsMs(b.created_at)).slice(-CLAIM_TAIL);
   const re = ledgerRe(project);
+  // CLAIM_TAIL bounds LEDGER rows, not raw comments. Slicing the raw tail first let ordinary
+  // discussion evict the records that prove ownership: with CLAIM_TAIL newer non-ledger
+  // comments the reader saw no claims at all, so `status` reported "none", claim's CONTENDED
+  // gate never fired, and the assignee PATCH stomped a live holder. The protocol truncates its
+  // own history too — postLedger appends a comment per claim/heartbeat/release.
+  // isLedger drops the /g/ flag: .test() on a global regex advances lastIndex between calls
+  // and would skip every other row. `re` keeps /g/ because matchAll requires it.
+  const isLedger = new RegExp(re.source);
+  const rows = results
+    .map((row) => ({ row, text: row.comment_stripped || stripHtml(row.comment_html || "") }))
+    .filter(({ text }) => isLedger.test(text))
+    .sort((a, b) => tsMs(a.row.created_at) - tsMs(b.row.created_at))
+    .slice(-CLAIM_TAIL);
   const latest = {};
-  for (const row of rows) {
-    const text = row.comment_stripped || stripHtml(row.comment_html || "");
+  for (const { row, text } of rows) {
     for (const match of text.matchAll(re)) {
       const [, verb, agent, single, double, bare, until] = match;
       latest[agent] = { verb, task: single || double || bare || "", until: until || null, at: row.created_at || "" };
@@ -283,13 +294,20 @@ export async function nextSlice({ api, flags, cwd }) {
       || (sa ? sa[1] : 0) - (sb ? sb[1] : 0)
       || (b.sequence_id ?? 0) - (a.sequence_id ?? 0);
   });
+  // Count what MATCHED, not what survived --limit: deriving the count from the truncated
+  // array reported "5 ready" on a 19-item backlog with no signal that anything was hidden.
+  // Mirrors wi list's `N of M matching` + escape-hatch hint (see wi.js).
+  const matching = ready.length;
   ready = ready.slice(0, limitValue(flags));
   if (!ready.length) return { next: `0 ${readyState} unclaimed slices${flags.stage ? ` in stage ${flags.stage}` : ""} in ${project.identifier}` };
   const slices = ready.map((item) => {
     const st = stageOf(item.name);
     return { seq: `${project.identifier}-${item.sequence_id}`, stage: st ? st[0] : "", priority: item.priority || "none", title: item.name, claimed: (item.assignees || []).length ? "taken" : "" };
   });
-  return withHelp({ count: `${slices.length} ready`, project: project.identifier, next: slices }, [`Claim one: plane-axi claim ${slices[0].seq} --task "..."`]);
+  const truncated = matching > slices.length;
+  const hints = [`Claim one: plane-axi claim ${slices[0].seq} --task "..."`];
+  if (truncated) hints.push(`Run \`plane-axi next\` without --limit for all ${matching} ready slices`);
+  return withHelp({ count: truncated ? `${slices.length} of ${matching} ready` : `${slices.length} ready`, project: project.identifier, next: slices }, hints);
 }
 
 export const _internals = { agentId, stageOf, isoUtc, parseMs, ledgerRe, encodeTask, escapeHtml, readClaims, ttlMinutes };
