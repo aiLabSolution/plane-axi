@@ -2,8 +2,18 @@ import { fileURLToPath } from "node:url";
 import { displayPath, findProjectConfig } from "../config.js";
 import { compactProject, projectPath } from "./common.js";
 import { resolveProject } from "../resolve.js";
+import { PACKAGE_VERSION } from "../version.js";
 
 const DESCRIPTION = "Manage Plane.so projects and work items from the current workspace";
+
+const binPath = (executable) => displayPath(executable || fileURLToPath(new URL("../../bin/plane-axi.js", import.meta.url)));
+
+// Reports the build actually executing, not whatever the registry or a tag claims: a global
+// install can lag the repo at an identical version string, so `bin` is what disambiguates.
+// Deliberately touches no credentials and makes no request, so it answers on a broken setup.
+export function version({ executable }) {
+  return { version: PACKAGE_VERSION, bin: binPath(executable), node: process.version };
+}
 
 export async function me({ api }) {
   const user = await api.get("/users/me/");
@@ -17,7 +27,7 @@ export async function me({ api }) {
 export async function home({ api, cwd, executable }) {
   const config = await findProjectConfig(cwd);
   const payload = {
-    bin: displayPath(executable || fileURLToPath(new URL("../../bin/plane-axi.js", import.meta.url))),
+    bin: binPath(executable),
     description: DESCRIPTION,
     workspace: api.config.workspace
   };

@@ -74,7 +74,8 @@ export const COMMAND_METADATA = {
     app: flag("claude|codex|opencode|all", { default: "all", choices: ["claude", "codex", "opencode", "all"] }),
     scope: flag("project|user", { default: "project", choices: ["project", "user"] }), skill: flag("Install the generated Agent Skill", { boolean: true })
   }, [], ["plane-axi setup", "plane-axi setup --app codex --scope user", "plane-axi setup --skill"]),
-  "snapshot": spec("Print compact SessionStart context", "plane-axi snapshot", commands.snapshot, {}, [], ["plane-axi snapshot", "cd <repo> && plane-axi snapshot"])
+  "snapshot": spec("Print compact SessionStart context", "plane-axi snapshot", commands.snapshot, {}, [], ["plane-axi snapshot", "cd <repo> && plane-axi snapshot"]),
+  "version": spec("Show the running version, executable path, and Node.js runtime", "plane-axi version", commands.version, {}, [], ["plane-axi version", "plane-axi --version"])
 };
 
 function spec(description, usage, handler, flags, positionals, examples) {
@@ -123,6 +124,7 @@ function groupHelp(group) {
 function resolveCommand(args) {
   if (!args.length) return { key: null, rest: [] };
   if (args[0] === "--help" || args[0] === "-h") return { key: "--help", rest: [] };
+  if (args[0] === "--version" || args[0] === "-v") return { key: "version", rest: [] };
   const isGroup = GROUPS.has(args[0]);
   const key = isGroup ? `${args[0]} ${args[1] || ""}`.trim() : args[0];
   const consumed = isGroup ? 2 : 1;

@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release-as:
+        description: "Force a specific version (e.g. 0.3.1); blank derives it from commits"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Two overlapping runs would race to tag the same commit.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Open the release PR, or tag and publish when it merges
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          # `main` requires the `test` check, and GitHub deliberately does not start
+          # workflows for events authored by GITHUB_TOKEN. With the default token the
+          # release PR opens but can never satisfy its own required check. Setting
+          # RELEASE_PLEASE_TOKEN (a PAT or app token with contents + pull-requests
+          # write) makes CI run on the release PR so it can merge unattended.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          release-as: ${{ inputs.release-as }}
+
+  verify:
+    name: verify release
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # release_created without a tag means the action changed its output contract;
+      # fail loudly rather than silently uploading the tarball nowhere.
+      - name: Require a resolved tag
+        run: test -n "${{ needs.release-please.outputs.tag }}"
+
+      - name: Check out the released tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check generated skill
+        run: npm run skill:check
+
+      # The defect that motivated this workflow was a published version whose code did
+      # not match its version string, so the release refuses to stand unless the tag,
+      # package.json, and the CLI's own self-report all agree.
+      - name: Verify the tag, package.json, and CLI agree on the version
+        run: |
+          tag="${{ needs.release-please.outputs.tag }}"
+          packaged="v$(node -p "require('./package.json').version")"
+          reported="v$(node bin/plane-axi.js version | awk '/^version:/ { gsub(/"/, "", $2); print $2 }')"
+          echo "tag=$tag package.json=$packaged cli=$reported"
+          test "$tag" = "$packaged" && test "$tag" = "$reported"
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Attach the package tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm pack
+          gh release upload "${{ needs.release-please.outputs.tag }}" ./*.tgz --clobber
