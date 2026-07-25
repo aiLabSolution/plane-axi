@@ -185,7 +185,7 @@ test("--version and -v resolve to the version command", async () => {
 test("version answers with no credentials configured", async () => {
   const result = await captureMain(["version"], { config: { apiKey: undefined, workspace: undefined, baseUrl: "https://plane.test/api/v1" } });
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`version: ${PACKAGE_VERSION.replace(/\./g, "\\.")}`));
+  assert.ok(result.stdout.includes(`version: ${PACKAGE_VERSION}`), `expected the reported version, got: ${result.stdout}`);
 });
 
 test("version collapses the home directory in the reported bin path", async () => {
