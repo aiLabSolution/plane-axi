@@ -40,7 +40,7 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 
 ### comment
 
-- `npx -y github:aiLabSolution/plane-axi comment list <wi-ref> [--all]` — List comments or all activity
+- `npx -y github:aiLabSolution/plane-axi comment list <wi-ref> [--all]` — List comments; --all also lists activity entries after them
 - `npx -y github:aiLabSolution/plane-axi comment add <wi-ref> (--body <text>|--body-file <path|->)` — Add a comment
 
 ### cycle
