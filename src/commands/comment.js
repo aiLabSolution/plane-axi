@@ -10,18 +10,32 @@ async function context({ api, flags, positionals, cwd }) {
   return resolveWorkItem(api, positionals[0], projectHint);
 }
 
+const renderEntry = (entry) => ({
+  author: entry.actor_detail?.display_name || entry.created_by_detail?.display_name || entry.actor || entry.created_by || "unknown",
+  body: stripHtml(entry.comment_html || entry.comment || entry.new_value || ""),
+  created_at: entry.created_at || ""
+});
+
 export async function commentList(ctx) {
   const { api, flags } = ctx;
   const { project, item } = await context(ctx);
-  const suffix = flags.all ? "activities" : "comments";
-  const { results, total } = await api.all(`${projectPath(api, project, "/work-items/")}${item.id}/${suffix}/`);
-  const comments = flags.all ? results : results.filter((entry) => !entry.field || entry.field === "comment");
-  if (!comments.length) return { comments: `0 ${flags.all ? "activities" : "comments"} on ${project.identifier}-${item.sequence_id}` };
-  return { count: `${comments.length} of ${total} total`, work_item: `${project.identifier}-${item.sequence_id}`, comments: comments.map((entry) => ({
-    author: entry.actor_detail?.display_name || entry.created_by_detail?.display_name || entry.actor || entry.created_by || "unknown",
-    body: stripHtml(entry.comment_html || entry.comment || entry.new_value || ""),
-    created_at: entry.created_at || ""
-  })) };
+  const ref = `${project.identifier}-${item.sequence_id}`;
+  const base = `${projectPath(api, project, "/work-items/")}${item.id}`;
+  const commentPage = await api.all(`${base}/comments/`);
+  const comments = commentPage.results.filter((entry) => !entry.field || entry.field === "comment");
+  if (!flags.all) {
+    if (!comments.length) return { comments: `0 comments on ${ref}` };
+    return { count: `${comments.length} of ${commentPage.total} total`, work_item: ref, comments: comments.map(renderEntry) };
+  }
+  const activityPage = await api.all(`${base}/activities/`);
+  if (!comments.length && !activityPage.results.length) return { comments: `0 comments and 0 activities on ${ref}` };
+  return {
+    count: `${comments.length} of ${commentPage.total} total`,
+    work_item: ref,
+    comments: comments.map(renderEntry),
+    activity_count: `${activityPage.results.length} of ${activityPage.total} total`,
+    activities: activityPage.results.map(renderEntry)
+  };
 }
 
 export async function commentAdd(ctx) {
