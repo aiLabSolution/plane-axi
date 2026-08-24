@@ -45,7 +45,11 @@ plane-axi use LABS
 plane-axi wi list
 ```
 
-The nearest `.plane-axi.json` is discovered by walking up from the current directory. Any project-scoped command can override it with `--project <uuid|identifier|exact-name>`.
+The nearest `.plane-axi.json` is discovered by walking up from the current directory.
+
+That selection is a **scope**, not just a default. Once a directory selects a project, every command that addresses a work item stays inside it: a readable ref carries its own project prefix, so `plane-axi wi view OTHER-7` run in a directory selected for `LABS` is refused rather than silently reading — or, for `wi update`/`comment add`/`claim`, writing to — a project you did not select. `--project <uuid|identifier|exact-name>` narrows or names the project when none is selected, and is refused when it disagrees with the selection.
+
+Discovery is the deliberate exception, because it cannot mutate anything: `project list` and `member list` are workspace-wide, and `wi search --workspace` searches every project. `wi search` alone searches only the selected project.
 
 ## Common commands
 
@@ -54,6 +58,8 @@ plane-axi project list
 plane-axi project view LABS
 plane-axi wi list --state started --priority high
 plane-axi wi view LABS-42
+plane-axi wi search authentication          # the selected project
+plane-axi wi search authentication --workspace
 plane-axi wi create --title "Fix authentication" --priority high
 plane-axi wi update LABS-42 --state completed
 plane-axi wi assign LABS-42 alice@example.com

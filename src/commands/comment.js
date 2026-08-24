@@ -1,13 +1,10 @@
-import { findProjectConfig } from "../config.js";
 import { UsageError } from "../errors.js";
 import { mdToHtml } from "../markdown.js";
 import { stripHtml, withHelp } from "../output.js";
-import { resolveWorkItem } from "../resolve.js";
-import { projectPath, readBody, requireOne } from "./common.js";
+import { currentWorkItem, projectPath, readBody, requireOne } from "./common.js";
 
 async function context({ api, flags, positionals, cwd }) {
-  const projectHint = flags.project || (await findProjectConfig(cwd))?.project;
-  return resolveWorkItem(api, positionals[0], projectHint);
+  return currentWorkItem(api, flags, cwd, positionals[0]);
 }
 
 const renderEntry = (entry) => ({

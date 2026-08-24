@@ -164,3 +164,22 @@ test("comment add --body-file renders markdown read from a file", async () => {
   await commentAdd({ api, flags: { project: "LABS", "body-file": file }, positionals: ["LABS-1"], cwd: "/tmp" });
   assert.equal(posted.comment_html, "<h2>Progress</h2>\n<ul><li>done</li></ul>");
 });
+
+test("comment add on a work item outside the selected project refuses before posting", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "plane-axi-comment-scope-"));
+  await writeFile(path.join(cwd, ".plane-axi.json"), JSON.stringify({ project: "LABS" }));
+  const selected = { id: "labs-id", identifier: "LABS", name: "Labs" };
+  const foreign = { id: "other-id", identifier: "OTHER", name: "Other" };
+  const api = {
+    workspacePath: (suffix) => suffix,
+    all: async (path) => {
+      if (path === "/projects/") return { results: [selected, foreign], total: 2 };
+      throw new Error(`unexpected all ${path}`);
+    },
+    post: async () => { throw new Error("a cross-project comment must never reach the API"); }
+  };
+  await assert.rejects(
+    () => commentAdd({ api, flags: { body: "note" }, positionals: ["OTHER-7"], cwd }),
+    (error) => error.name === "AxiError" && error.message === "OTHER-7 is outside the selected project LABS"
+  );
+});

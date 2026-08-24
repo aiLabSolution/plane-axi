@@ -338,3 +338,74 @@ test("resolveState (via wi create) still reports ambiguity when multiple states 
     (error) => error.name === "AxiError" && /ambiguous state started/.test(error.message)
   );
 });
+
+async function scopedCwd(project) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "plane-axi-wi-scope-"));
+  await writeFile(path.join(dir, ".plane-axi.json"), JSON.stringify({ project }));
+  return dir;
+}
+
+function twoProjectApi(scanned, counters = {}) {
+  const selected = { id: "labs-id", identifier: "LABS", name: "Labs" };
+  const foreign = { id: "other-id", identifier: "OTHER", name: "Other" };
+  return {
+    workspacePath: (suffix) => suffix,
+    get: async () => { counters.searchEndpoint = (counters.searchEndpoint || 0) + 1; throw new AxiError("no search endpoint", { status: 404 }); },
+    all: async (path) => {
+      if (path === "/projects/") return { results: [selected, foreign], total: 2 };
+      if (path.endsWith("/states/")) return { results: [], total: 0 };
+      scanned.push(path);
+      return { results: [{ id: `item-${scanned.length}`, sequence_id: 5, name: "needle" }], total: 1 };
+    }
+  };
+}
+
+test("wi search is scoped to the selected project and leaves other projects unscanned", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  const counters = {};
+  const result = await wiSearch({ api: twoProjectApi(scanned, counters), flags: {}, positionals: ["needle"], cwd });
+  assert.deepEqual(scanned, ["/projects/labs-id/work-items/"]);
+  assert.equal(counters.searchEndpoint, undefined); // a scoped search never consults the workspace endpoint
+  assert.equal(result.project, "LABS");
+  assert.equal(result.wi[0].seq, "LABS-5");
+  assert.equal(result.wi[0].project, undefined); // named once in the payload, not repeated per row
+});
+
+test("wi search --workspace still spans every project in the workspace", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  const result = await wiSearch({ api: twoProjectApi(scanned), flags: { workspace: true }, positionals: ["needle"], cwd });
+  assert.deepEqual(scanned, ["/projects/labs-id/work-items/", "/projects/other-id/work-items/"]);
+  assert.equal(result.project, undefined);
+  assert.deepEqual(result.wi.map((row) => row.project), ["LABS", "OTHER"]);
+});
+
+test("wi search --project refuses a project outside the selected one", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  await assert.rejects(
+    () => wiSearch({ api: twoProjectApi(scanned), flags: { project: "OTHER" }, positionals: ["needle"], cwd }),
+    (error) => error.name === "AxiError" && error.message === "project OTHER is outside the selected project LABS"
+  );
+  assert.deepEqual(scanned, []);
+});
+
+test("wi search rejects --workspace with --project before any API call", async () => {
+  const cwd = await scopedCwd("LABS");
+  const api = { workspacePath: (suffix) => suffix, get: async () => { throw new Error("no request expected"); }, all: async () => { throw new Error("no request expected"); } };
+  await assert.rejects(
+    () => wiSearch({ api, flags: { workspace: true, project: "OTHER" }, positionals: ["needle"], cwd }),
+    (error) => error.name === "UsageError"
+  );
+});
+
+test("wi list --project refuses a project outside the selected one", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  await assert.rejects(
+    () => wiList({ api: twoProjectApi(scanned), flags: { project: "OTHER" }, cwd }),
+    (error) => error.name === "AxiError" && error.message === "project OTHER is outside the selected project LABS"
+  );
+  assert.deepEqual(scanned, []);
+});

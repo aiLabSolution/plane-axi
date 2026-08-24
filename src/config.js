@@ -44,11 +44,16 @@ export async function findProjectConfig(start = process.cwd()) {
   }
 }
 
+// Returns both the project to act on and the directory config that scopes it. The config is a
+// boundary, not merely a default: callers pass the boundary on to assertProjectInScope so a
+// `--project` (or a readable ref's own prefix) naming a different project is refused rather
+// than silently honoured. Discovery commands that legitimately span the workspace
+// (`project list`, `member list`, `wi search --workspace`) never consult it.
 export async function selectedProject(flags = {}, cwd = process.cwd()) {
-  if (flags.project) return flags.project;
-  const config = await findProjectConfig(cwd);
-  if (config?.project) return config.project;
-  throw new UsageError("no project selected", "Run `plane-axi use <project>` or pass `--project <project>`");
+  const boundary = await findProjectConfig(cwd);
+  const ref = flags.project || boundary?.project;
+  if (!ref) throw new UsageError("no project selected", "Run `plane-axi use <project>` or pass `--project <project>`");
+  return { ref, boundary };
 }
 
 export function displayPath(file) {

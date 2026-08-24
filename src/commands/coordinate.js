@@ -18,11 +18,10 @@
 // keeps the coarse assignee flag while any other agent still holds a live claim on a shared
 // item, so it doesn't resurface in another agent's `next` mid-work.
 import os from "node:os";
-import { findProjectConfig, selectedProject } from "../config.js";
 import { AxiError, UsageError } from "../errors.js";
 import { stripHtml, withHelp } from "../output.js";
-import { resolveProject, resolveWorkItem, UUID } from "../resolve.js";
-import { projectPath } from "./common.js";
+import { UUID } from "../resolve.js";
+import { currentProject, currentWorkItem, projectPath } from "./common.js";
 
 const DEFAULT_READY_STATE = "ready-for-agent";
 const DEFAULT_TTL_MINUTES = 90;
@@ -119,8 +118,7 @@ async function selfId(api) {
 }
 
 async function itemContext({ api, flags, positionals, cwd }) {
-  const hint = flags.project || (await findProjectConfig(cwd))?.project;
-  return resolveWorkItem(api, positionals[0], hint);
+  return currentWorkItem(api, flags, cwd, positionals[0]);
 }
 
 async function resolveStateId(api, project, ref, states) {
@@ -277,7 +275,7 @@ export async function claimStatus(ctx) {
 }
 
 export async function nextSlice({ api, flags, cwd }) {
-  const project = await resolveProject(api, await selectedProject(flags, cwd));
+  const project = await currentProject(api, flags, cwd);
   const readyState = flags["ready-state"] || DEFAULT_READY_STATE;
   const { results } = await api.all(projectPath(api, project, "/work-items/"), { expand: "state", fields: "id,sequence_id,name,priority,state,assignees" });
   let ready = results.filter((item) => stateName(item) === readyState && (flags["include-claimed"] || !(item.assignees || []).length));

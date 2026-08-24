@@ -268,3 +268,63 @@ test("resolveWorkItem: PLANE_AXI_NO_CACHE=1 bypasses a populated cache entirely"
     delete process.env.PLANE_AXI_NO_CACHE;
   }
 });
+
+test("resolveWorkItem refuses a readable ref from another project before touching its work items", async () => {
+  const cacheFile = await tmpCacheFile();
+  const selected = { id: "lis-id", identifier: "LIS", name: "LIS" };
+  const foreign = { id: "labso-id", identifier: "LABSO", name: "Labsolution" };
+  const api = {
+    config: { workspace: "labsolution" },
+    workspacePath: (suffix) => suffix,
+    get: async (path) => {
+      if (path === "/projects/lis-id/") return selected;
+      throw new Error(`unexpected get ${path}`);
+    },
+    all: async (path) => {
+      if (path === "/projects/") return { results: [selected, foreign], total: 2 };
+      throw new Error(`unexpected all ${path} (the refusal must precede any work-item scan)`);
+    }
+  };
+  await assert.rejects(
+    () => resolveWorkItem(api, "LABSO-17", "LIS", cacheFile, { project: "LIS", file: "/repo/.plane-axi.json" }),
+    (error) => error.name === "AxiError"
+      && error.message === "LABSO-17 is outside the selected project LIS"
+      && error.help[0] === "/repo/.plane-axi.json selects LIS for this directory"
+  );
+});
+
+test("resolveWorkItem accepts a ref naming the selected project without a second project lookup", async () => {
+  const cacheFile = await tmpCacheFile();
+  const project = { id: "lis-id", identifier: "LIS", name: "LIS" };
+  const gets = [];
+  const api = {
+    config: { workspace: "labsolution" },
+    workspacePath: (suffix) => suffix,
+    get: async (path) => { gets.push(path); throw notFound(); },
+    all: async (path) => {
+      if (path === "/projects/") return { results: [project], total: 1 };
+      if (path === "/projects/lis-id/work-items/") return { results: [{ id: "item-id", sequence_id: 42, name: "Title" }], total: 1 };
+      throw new Error(`unexpected all ${path}`);
+    }
+  };
+  const { item } = await resolveWorkItem(api, "LIS-42", "LIS", cacheFile, { project: "LIS", file: "/repo/.plane-axi.json" });
+  assert.equal(item.id, "item-id");
+  assert.deepEqual(gets, []); // the identifier fast path spends no extra request confirming the scope
+});
+
+test("a scope recorded as the project's exact name still accepts that project's refs", async () => {
+  const cacheFile = await tmpCacheFile();
+  const project = { id: "labso-id", identifier: "LABSO", name: "Labsolution" };
+  const api = {
+    config: { workspace: "labsolution" },
+    workspacePath: (suffix) => suffix,
+    get: async () => { throw notFound(); },
+    all: async (path) => {
+      if (path === "/projects/") return { results: [project], total: 1 };
+      if (path === "/projects/labso-id/work-items/") return { results: [{ id: "item-id", sequence_id: 3, name: "Title" }], total: 1 };
+      throw new Error(`unexpected all ${path}`);
+    }
+  };
+  const { item } = await resolveWorkItem(api, "LABSO-3", "Labsolution", cacheFile, { project: "Labsolution", file: "/repo/.plane-axi.json" });
+  assert.equal(item.id, "item-id");
+});
