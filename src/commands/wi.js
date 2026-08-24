@@ -13,9 +13,12 @@ const FIELD_NAMES = new Set(["id", "seq", "title", "state", "priority", "assigne
 // rate budget (see planelib.py's LIST_FIELDS).
 const LIST_FIELDS = "id,sequence_id,name,priority,state,assignees,labels,created_at,updated_at";
 const LIST_QUERY = { fields: LIST_FIELDS, expand: "state" };
-// Search's per-project fallback scan only ever reads name + description_html (see
-// searchItems below), so nothing else is worth the extra payload.
+// The body scan only ever reads name + description_html (see matchesQuery), so nothing else is
+// worth the extra payload.
 const SEARCH_QUERY = { fields: "id,sequence_id,name,description_html" };
+// Ceiling for the server search's own --limit, matching limitValue's maximum: --all has no
+// number to send, and an unbounded request is not something to aim at someone's Plane.
+const SEARCH_CAP = 1000;
 
 async function workItemContext({ api, flags, positionals, cwd }, index = 0) {
   return currentWorkItem(api, flags, cwd, positionals[index]);
@@ -246,26 +249,46 @@ async function scanProject(api, project, lower) {
   return results.filter((item) => matchesQuery(item, lower)).map((item) => ({ ...item, project_identifier: project.identifier }));
 }
 
-// Only reached for --workspace: the workspace search endpoint is absent on some Plane
-// deployments (it 404s), and the fallback then has to scan every project in the workspace.
-async function searchWorkspace(api, lower, query) {
-  try {
-    return searchItems(await api.get(api.workspacePath("/search/"), { search: query, type: "work_item" }));
-  } catch (error) {
-    if (error.status !== 404) throw error;
-  }
+async function scanEveryProject(api, lower) {
   const projects = (await api.all(api.workspacePath("/projects/"))).results;
   const items = [];
   for (const project of projects) items.push(...await scanProject(api, project, lower));
   return items;
 }
 
+// Titles are matched by the server, which is one request instead of paging every work item in
+// the project — but the endpoint matches titles and ids only: a term that appears solely in a
+// body returns nothing here, which is why --text still exists and why the mode is named in
+// every result. Absent on deployments that predate it, hence the 404 fallback in searchFor.
+async function searchTitles(api, query, project, cap) {
+  const params = { search: query, limit: cap };
+  if (project) params.project_id = project.id;
+  return searchItems(await api.get(api.workspacePath("/issues/search/"), params));
+}
+
+// Returns the rows plus how they were matched: "title" costs one request but only sees titles,
+// "title+body" scans and sees everything. The caller never has to guess which one ran — a 404
+// silently downgrading to a scan would otherwise report title semantics for body results.
+async function searchFor(api, { query, lower, project, limit, text }) {
+  if (!text) {
+    // One row past the limit is what distinguishes "exactly this many" from "at least this
+    // many": the endpoint reports no total of its own.
+    const cap = Math.min(limit === Infinity ? SEARCH_CAP : limit + 1, SEARCH_CAP);
+    try {
+      return { items: await searchTitles(api, query, project, cap), match: "title", cap };
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  const items = project ? await scanProject(api, project, lower) : await scanEveryProject(api, lower);
+  return { items, match: "title+body", cap: null };
+}
+
 // Search is scoped to the selected project by default. It used to be workspace-wide with no
 // way to narrow it, which put other projects' work items in front of a caller working in this
-// one — the first step of a cross-project reference leaking into scoped work. Scoping it also
-// turns the fallback's every-project scan into a single-project one. `--workspace` still
-// searches everything for callers who mean to; it is read-only, and the scoped path is what
-// runs unless it is asked for.
+// one — the first step of a cross-project reference leaking into scoped work. `--workspace`
+// still searches everything for callers who mean to; it is read-only, and the scoped path is
+// what runs unless it is asked for.
 export async function wiSearch({ api, flags, positionals, cwd }) {
   const query = positionals.join(" ");
   const lower = query.toLowerCase();
@@ -276,20 +299,32 @@ export async function wiSearch({ api, flags, positionals, cwd }) {
   const project = scopeRef
     ? await assertProjectInScope(api, await resolveProject(api, scopeRef), boundary, undefined, `project ${scopeRef}`)
     : null;
-  let items = project ? await scanProject(api, project, lower) : await searchWorkspace(api, lower, query);
-  if (!items.length) return { wi: `0 work items matching ${query}${project ? ` in ${project.identifier}` : ""}` };
-  const total = items.length;
-  items = items.slice(0, limit);
+  const { items: found, match, cap } = await searchFor(api, { query, lower, project, limit, text: flags.text });
+  const where = project ? ` in ${project.identifier}` : "";
+  const rerun = `${query}${flags.project ? ` --project ${flags.project}` : ""}${flags.workspace ? " --workspace" : ""}`;
+  if (!found.length) {
+    const miss = { wi: `0 work items matching ${query}${where} by ${match}` };
+    // A title-only miss is the one case where the wider search plainly might not miss, so this
+    // is the one place --text is worth naming.
+    return match === "title" ? withHelp(miss, [`Run \`plane-axi wi search ${rerun} --text\` to match bodies too`]) : miss;
+  }
+  const items = found.slice(0, limit === Infinity ? found.length : limit);
+  // A scan knows its true total. The server search only knows how many rows it was allowed to
+  // return, so it reports "N or more" rather than a total it never established.
+  const truncated = found.length > items.length || (cap !== null && found.length >= cap);
+  const count = cap === null
+    ? `${items.length} of ${found.length} matching`
+    : `${items.length} matching${truncated ? " or more" : ""}`;
   const hints = ["Run `plane-axi wi view <ref>` for details"];
-  if (items.length < total) hints.push(`Run \`plane-axi wi search ${query}${flags.project ? ` --project ${flags.project}` : ""}${flags.workspace ? " --workspace" : ""} --all\` for all ${total} matches`);
+  if (truncated) hints.push(`Run \`plane-axi wi search ${rerun} --all\` for ${cap === null ? `all ${found.length} matches` : "every match"}`);
   const row = (item) => {
-    const identifier = item.project_identifier || item.project_detail?.identifier;
+    const identifier = item.project_identifier || item.project__identifier || item.project_detail?.identifier;
     const rendered = { seq: item.sequence_id && identifier ? `${identifier}-${item.sequence_id}` : item.id, title: item.name || item.title };
     // A scoped search names its project once in the payload, so repeating it on every row is
     // pure output weight; a workspace search needs it per row to stay unambiguous.
     return project ? rendered : { ...rendered, project: identifier || item.project || "" };
   };
-  const payload = { count: `${items.length} of ${total} matching`, ...(project ? { project: project.identifier } : {}), wi: items.map(row) };
+  const payload = { count, match, ...(project ? { project: project.identifier } : {}), wi: items.map(row) };
   return withHelp(payload, hints);
 }
 

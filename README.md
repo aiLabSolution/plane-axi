@@ -51,6 +51,12 @@ That selection is a **scope**, not just a default. Once a directory selects a pr
 
 Discovery is the deliberate exception, because it cannot mutate anything: `project list` and `member list` are workspace-wide, and `wi search --workspace` searches every project. `wi search` alone searches only the selected project.
 
+### Search modes
+
+`wi search` matches **titles**, which Plane resolves server-side in a single request. `--text` matches **bodies as well**, which it can only do by paging the project's work items and matching locally - slower, and the only way to find a term that appears nowhere in a title. Every result names the mode that produced it (`match: title` or `match: title+body`), and a title search that finds nothing points at `--text` rather than leaving you to guess whether the term exists.
+
+Deployments that predate Plane's title-search endpoint fall back to the body scan automatically, and say `match: title+body` when they do. Because the endpoint reports no total of its own, a capped title search says `N matching or more` rather than a total it never established.
+
 ## Common commands
 
 ```sh
@@ -58,7 +64,8 @@ plane-axi project list
 plane-axi project view LABS
 plane-axi wi list --state started --priority high
 plane-axi wi view LABS-42
-plane-axi wi search authentication          # the selected project
+plane-axi wi search authentication           # titles, selected project
+plane-axi wi search authentication --text    # titles and bodies
 plane-axi wi search authentication --workspace
 plane-axi wi create --title "Fix authentication" --priority high
 plane-axi wi update LABS-42 --state completed

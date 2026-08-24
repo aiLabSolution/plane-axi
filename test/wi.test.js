@@ -345,14 +345,22 @@ async function scopedCwd(project) {
   return dir;
 }
 
-function twoProjectApi(scanned, counters = {}) {
-  const selected = { id: "labs-id", identifier: "LABS", name: "Labs" };
-  const foreign = { id: "other-id", identifier: "OTHER", name: "Other" };
+const SELECTED = { id: "labs-id", identifier: "LABS", name: "Labs" };
+const FOREIGN = { id: "other-id", identifier: "OTHER", name: "Other" };
+
+// serverSearch: (params) => rows, or an AxiError to throw (404 = endpoint absent).
+function searchApi({ serverSearch, scanned = [], searches = [] } = {}) {
   return {
     workspacePath: (suffix) => suffix,
-    get: async () => { counters.searchEndpoint = (counters.searchEndpoint || 0) + 1; throw new AxiError("no search endpoint", { status: 404 }); },
+    get: async (path, params) => {
+      assert.equal(path, "/issues/search/");
+      searches.push(params);
+      const outcome = serverSearch ? serverSearch(params) : [];
+      if (outcome instanceof Error) throw outcome;
+      return { issues: outcome };
+    },
     all: async (path) => {
-      if (path === "/projects/") return { results: [selected, foreign], total: 2 };
+      if (path === "/projects/") return { results: [SELECTED, FOREIGN], total: 2 };
       if (path.endsWith("/states/")) return { results: [], total: 0 };
       scanned.push(path);
       return { results: [{ id: `item-${scanned.length}`, sequence_id: 5, name: "needle" }], total: 1 };
@@ -360,35 +368,111 @@ function twoProjectApi(scanned, counters = {}) {
   };
 }
 
-test("wi search is scoped to the selected project and leaves other projects unscanned", async () => {
+const titleRow = (project, sequence) => ({ id: `item-${sequence}`, sequence_id: sequence, name: "needle", project__identifier: project.identifier, project_id: project.id });
+
+test("wi search asks the server for titles in the selected project and scans nothing", async () => {
   const cwd = await scopedCwd("LABS");
   const scanned = [];
-  const counters = {};
-  const result = await wiSearch({ api: twoProjectApi(scanned, counters), flags: {}, positionals: ["needle"], cwd });
-  assert.deepEqual(scanned, ["/projects/labs-id/work-items/"]);
-  assert.equal(counters.searchEndpoint, undefined); // a scoped search never consults the workspace endpoint
+  const searches = [];
+  const api = searchApi({ scanned, searches, serverSearch: () => [titleRow(SELECTED, 5)] });
+  const result = await wiSearch({ api, flags: {}, positionals: ["needle"], cwd });
+  assert.deepEqual(searches, [{ search: "needle", limit: 51, project_id: "labs-id" }]);
+  assert.deepEqual(scanned, []);
+  assert.equal(result.match, "title");
   assert.equal(result.project, "LABS");
   assert.equal(result.wi[0].seq, "LABS-5");
   assert.equal(result.wi[0].project, undefined); // named once in the payload, not repeated per row
 });
 
-test("wi search --workspace still spans every project in the workspace", async () => {
+test("wi search --workspace drops the project filter and labels each row", async () => {
   const cwd = await scopedCwd("LABS");
-  const scanned = [];
-  const result = await wiSearch({ api: twoProjectApi(scanned), flags: { workspace: true }, positionals: ["needle"], cwd });
-  assert.deepEqual(scanned, ["/projects/labs-id/work-items/", "/projects/other-id/work-items/"]);
+  const searches = [];
+  const api = searchApi({ searches, serverSearch: () => [titleRow(SELECTED, 5), titleRow(FOREIGN, 9)] });
+  const result = await wiSearch({ api, flags: { workspace: true }, positionals: ["needle"], cwd });
+  assert.equal(searches[0].project_id, undefined);
   assert.equal(result.project, undefined);
   assert.deepEqual(result.wi.map((row) => row.project), ["LABS", "OTHER"]);
+});
+
+test("wi search --text scans the selected project and leaves other projects unscanned", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  const searches = [];
+  const api = searchApi({ scanned, searches });
+  const result = await wiSearch({ api, flags: { text: true }, positionals: ["needle"], cwd });
+  assert.deepEqual(scanned, ["/projects/labs-id/work-items/"]);
+  assert.deepEqual(searches, []); // --text never asks the title endpoint
+  assert.equal(result.match, "title+body");
+  assert.equal(result.count, "1 of 1 matching");
+});
+
+test("wi search --text --workspace scans every project", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  const api = searchApi({ scanned });
+  await wiSearch({ api, flags: { text: true, workspace: true }, positionals: ["needle"], cwd });
+  assert.deepEqual(scanned, ["/projects/labs-id/work-items/", "/projects/other-id/work-items/"]);
+});
+
+test("a Plane without the title endpoint falls back to a body scan and reports the wider match", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  const api = searchApi({ scanned, serverSearch: () => new AxiError("no such endpoint", { status: 404 }) });
+  const result = await wiSearch({ api, flags: {}, positionals: ["needle"], cwd });
+  assert.deepEqual(scanned, ["/projects/labs-id/work-items/"]);
+  assert.equal(result.match, "title+body"); // the caller is told the semantics widened
+});
+
+test("a server-search failure that is not a 404 is not silently downgraded to a scan", async () => {
+  const cwd = await scopedCwd("LABS");
+  const scanned = [];
+  const api = searchApi({ scanned, serverSearch: () => new AxiError("Plane is unavailable", { status: 503 }) });
+  await assert.rejects(() => wiSearch({ api, flags: {}, positionals: ["needle"], cwd }), (error) => error.status === 503);
+  assert.deepEqual(scanned, []);
+});
+
+test("a title-only miss points at --text; a body scan's miss has nothing wider to offer", async () => {
+  const cwd = await scopedCwd("LABS");
+  const api = searchApi({ serverSearch: () => [] });
+  const titleMiss = await wiSearch({ api, flags: {}, positionals: ["needle"], cwd });
+  assert.match(titleMiss.wi, /0 work items matching needle in LABS by title/);
+  assert.match(titleMiss.help[0], /--text/);
+
+  const empty = { workspacePath: (suffix) => suffix, all: async (path) => path === "/projects/" ? { results: [SELECTED], total: 1 } : { results: [], total: 0 } };
+  const textMiss = await wiSearch({ api: empty, flags: { text: true }, positionals: ["needle"], cwd });
+  assert.match(textMiss.wi, /by title\+body/);
+  assert.equal(textMiss.help, undefined);
+});
+
+test("the server search reports 'or more' instead of inventing a total it never established", async () => {
+  const cwd = await scopedCwd("LABS");
+  const rows = Array.from({ length: 4 }, (_, index) => titleRow(SELECTED, index + 1));
+  const api = searchApi({ serverSearch: () => rows });
+  const result = await wiSearch({ api, flags: { limit: "3" }, positionals: ["needle"], cwd });
+  assert.equal(result.count, "3 matching or more");
+  assert.equal(result.wi.length, 3);
+  assert.match(result.help[1], /--all/);
+});
+
+test("--all caps the server search rather than requesting an unbounded page", async () => {
+  const cwd = await scopedCwd("LABS");
+  const searches = [];
+  const api = searchApi({ searches, serverSearch: () => [titleRow(SELECTED, 5)] });
+  const result = await wiSearch({ api, flags: { all: true }, positionals: ["needle"], cwd });
+  assert.equal(searches[0].limit, 1000);
+  assert.equal(result.count, "1 matching");
 });
 
 test("wi search --project refuses a project outside the selected one", async () => {
   const cwd = await scopedCwd("LABS");
   const scanned = [];
+  const searches = [];
   await assert.rejects(
-    () => wiSearch({ api: twoProjectApi(scanned), flags: { project: "OTHER" }, positionals: ["needle"], cwd }),
+    () => wiSearch({ api: searchApi({ scanned, searches }), flags: { project: "OTHER" }, positionals: ["needle"], cwd }),
     (error) => error.name === "AxiError" && error.message === "project OTHER is outside the selected project LABS"
   );
   assert.deepEqual(scanned, []);
+  assert.deepEqual(searches, []);
 });
 
 test("wi search rejects --workspace with --project before any API call", async () => {
@@ -404,7 +488,7 @@ test("wi list --project refuses a project outside the selected one", async () =>
   const cwd = await scopedCwd("LABS");
   const scanned = [];
   await assert.rejects(
-    () => wiList({ api: twoProjectApi(scanned), flags: { project: "OTHER" }, cwd }),
+    () => wiList({ api: searchApi({ scanned }), flags: { project: "OTHER" }, cwd }),
     (error) => error.name === "AxiError" && error.message === "project OTHER is outside the selected project LABS"
   );
   assert.deepEqual(scanned, []);
