@@ -36,7 +36,7 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 - `npx -y github:aiLabSolution/plane-axi wi assign <ref> <member>...` — Replace work item assignees
 - `npx -y github:aiLabSolution/plane-axi wi close <ref>` — Move a work item to the first completed state
 - `npx -y github:aiLabSolution/plane-axi wi delete <ref> --yes` — Delete a work item
-- `npx -y github:aiLabSolution/plane-axi wi search <query> [--limit <n>|--all]` — Search work items across the workspace
+- `npx -y github:aiLabSolution/plane-axi wi search <query> [--project <ref>|--workspace] [--limit <n>|--all]` — Search work items in the selected project
 
 ### comment
 

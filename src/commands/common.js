@@ -1,14 +1,27 @@
 import { readFile } from "node:fs/promises";
-import { selectedProject } from "../config.js";
+import { findProjectConfig, selectedProject } from "../config.js";
 import { UsageError } from "../errors.js";
-import { resolveProject } from "../resolve.js";
+import { assertProjectInScope, resolveProject, resolveWorkItem } from "../resolve.js";
 
 export function projectPath(api, project, suffix = "") {
   return api.workspacePath(`/projects/${project.id}${suffix}`);
 }
 
+// Every project-addressed command resolves its project here, so the directory scope is
+// enforced in one place: a `--project` naming something other than the selected project is
+// refused instead of silently overriding it.
 export async function currentProject(api, flags, cwd) {
-  return resolveProject(api, await selectedProject(flags, cwd));
+  const { ref, boundary } = await selectedProject(flags, cwd);
+  const project = await resolveProject(api, ref);
+  return assertProjectInScope(api, project, boundary, undefined, `project ${ref}`);
+}
+
+// The work-item twin of currentProject. A readable ref supplies its own project, so unlike
+// currentProject this does not require one to be selected — but when one is, the ref must
+// name it. Every wi/comment/claim command addresses its item through here.
+export async function currentWorkItem(api, flags, cwd, ref) {
+  const boundary = await findProjectConfig(cwd);
+  return resolveWorkItem(api, ref, flags.project || boundary?.project, undefined, boundary);
 }
 
 export function compactProject(project) {

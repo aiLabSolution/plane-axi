@@ -1,4 +1,5 @@
 import { cachedItemId, cachedProjectId, cachePath, rememberItems, rememberProjects } from "./cache.js";
+import { displayPath } from "./config.js";
 import { AxiError, UsageError } from "./errors.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -49,7 +50,34 @@ export async function resolveProject(api, ref, cacheFile = cachePath()) {
   throw new AxiError(`project ${ref} not found`, { help: "Run `plane-axi project list` to see projects" });
 }
 
-export async function resolveWorkItem(api, ref, projectHint, cacheFile = cachePath()) {
+function sameRef(left, right) {
+  return typeof left === "string" && typeof right === "string" && left.toLowerCase() === right.toLowerCase();
+}
+
+// The directory config is a scope, not merely a default. A readable ref carries its own project
+// prefix, so without this check `wi view OTHER-7` run inside a directory selected for LABS reads
+// — and `wi update`/`comment add`/`claim` would mutate — a project the caller never selected.
+// That is exactly how a foreign work item leaks into scoped work, so addressing a work item is
+// confined to the selected project. Explicit discovery (`project list`, `wi search --workspace`)
+// still spans the workspace; it cannot mutate anything. The error deliberately does not name a
+// bypass: the fix is to address an item in this project, or to work from that project's own
+// directory.
+export async function assertProjectInScope(api, project, boundary, cacheFile = cachePath(), ref) {
+  if (!boundary?.project) return project;
+  if (sameRef(boundary.project, project.identifier) || sameRef(boundary.project, project.id)) return project;
+  // The boundary may be an exact name rather than an identifier, so compare resolved ids before
+  // refusing. resolveProject is cache-backed, so this costs one direct GET on the rare miss.
+  const allowed = await resolveProject(api, boundary.project, cacheFile);
+  if (allowed.id === project.id) return project;
+  throw new AxiError(`${ref || project.identifier} is outside the selected project ${allowed.identifier}`, {
+    help: [
+      `${displayPath(boundary.file)} selects ${allowed.identifier} for this directory`,
+      `Run \`plane-axi wi list\` to see ${allowed.identifier} work items`
+    ]
+  });
+}
+
+export async function resolveWorkItem(api, ref, projectHint, cacheFile = cachePath(), boundary = null) {
   ref = validRef(ref, "work item");
   let project;
   let sequence;
@@ -66,6 +94,7 @@ export async function resolveWorkItem(api, ref, projectHint, cacheFile = cachePa
       project = await resolveProject(api, projectHint, cacheFile);
     }
   }
+  await assertProjectInScope(api, project, boundary, cacheFile, ref);
   const base = api.workspacePath(`/projects/${project.id}/work-items/`);
   const workspace = api.config?.workspace;
   if (UUID.test(ref)) {

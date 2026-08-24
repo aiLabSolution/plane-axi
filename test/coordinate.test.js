@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { claim, heartbeat, release, claimStatus, nextSlice, _internals } from "../src/commands/coordinate.js";
 
 const PROJECT = { id: "p1", identifier: "LABS", name: "Labs" };
@@ -286,4 +289,23 @@ test("next reports the matching total, not the truncated count, and hints the es
 test("parseMs treats an offset-less until stamp as UTC, not local time", () => {
   assert.equal(_internals.parseMs("2026-07-24T14:30:00"), Date.parse("2026-07-24T14:30:00Z"));
   assert.equal(_internals.parseMs("2026-07-24T14:30:00+02:00"), Date.parse("2026-07-24T14:30:00+02:00"));
+});
+
+test("claim refuses a work item outside the selected project before writing a ledger entry", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "plane-axi-claim-scope-"));
+  await writeFile(path.join(cwd, ".plane-axi.json"), JSON.stringify({ project: "LABS" }));
+  const foreign = { id: "other-id", identifier: "OTHER", name: "Other" };
+  const api = {
+    workspacePath: (suffix) => suffix,
+    all: async (path) => {
+      if (path === "/projects/") return { results: [PROJECT, foreign], total: 2 };
+      throw new Error(`unexpected all ${path}`);
+    },
+    post: async () => { throw new Error("a cross-project claim must never reach the API"); },
+    patch: async () => { throw new Error("a cross-project claim must never reach the API"); }
+  };
+  await assert.rejects(
+    () => claim({ api, flags: { task: "work", ttl: "360" }, positionals: ["OTHER-7"], cwd }),
+    (error) => error.name === "AxiError" && error.message === "OTHER-7 is outside the selected project LABS"
+  );
 });

@@ -1,9 +1,9 @@
-import { findProjectConfig, selectedProject } from "../config.js";
+import { findProjectConfig } from "../config.js";
 import { AxiError, UsageError } from "../errors.js";
 import { mdToHtml } from "../markdown.js";
 import { stripHtml, truncate, withHelp } from "../output.js";
-import { resolveNamed, resolveProject, resolveWorkItem } from "../resolve.js";
-import { atMostOne, projectPath, readBody } from "./common.js";
+import { assertProjectInScope, resolveNamed, resolveProject } from "../resolve.js";
+import { atMostOne, currentProject, currentWorkItem, projectPath, readBody } from "./common.js";
 
 const PRIORITIES = new Set(["urgent", "high", "medium", "low", "none"]);
 const FIELD_NAMES = new Set(["id", "seq", "title", "state", "priority", "assignee", "labels", "created_at", "updated_at"]);
@@ -17,13 +17,8 @@ const LIST_QUERY = { fields: LIST_FIELDS, expand: "state" };
 // searchItems below), so nothing else is worth the extra payload.
 const SEARCH_QUERY = { fields: "id,sequence_id,name,description_html" };
 
-async function optionalProject(flags, cwd) {
-  if (flags.project) return flags.project;
-  return (await findProjectConfig(cwd))?.project;
-}
-
 async function workItemContext({ api, flags, positionals, cwd }, index = 0) {
-  return resolveWorkItem(api, positionals[index], await optionalProject(flags, cwd));
+  return currentWorkItem(api, flags, cwd, positionals[index]);
 }
 
 async function statesFor(api, project) {
@@ -100,7 +95,7 @@ export async function wiList({ api, flags, cwd }) {
   const limit = limitValue(flags);
   const priority = checkPriority(flags.priority);
   const fields = requestedFields(flags.fields);
-  const project = await resolveProject(api, await selectedProject(flags, cwd));
+  const project = await currentProject(api, flags, cwd);
   const states = await statesFor(api, project);
   const stateById = new Map(states.map((state) => [state.id, state]));
   const member = flags.assignee ? await resolveMember(api, flags.assignee) : null;
@@ -162,7 +157,7 @@ export async function wiView(ctx) {
 export async function wiCreate({ api, flags, cwd }) {
   const priority = checkPriority(flags.priority);
   const bodySource = atMostOne(flags, ["body", "body-file"], "create accepts at most one of --body or --body-file");
-  const project = await resolveProject(api, await selectedProject(flags, cwd));
+  const project = await currentProject(api, flags, cwd);
   const data = { name: flags.title };
   if (bodySource) {
     const raw = bodySource === "body" ? flags.body : await readBody(flags["body-file"]);
@@ -242,32 +237,60 @@ function searchItems(body) {
   return [];
 }
 
-export async function wiSearch({ api, flags, positionals }) {
-  const query = positionals.join(" ");
-  const limit = limitValue(flags);
-  let items = [];
+function matchesQuery(item, lower) {
+  return `${item.name || ""}\n${stripHtml(item.description_html || item.description || "")}`.toLowerCase().includes(lower);
+}
+
+async function scanProject(api, project, lower) {
+  const { results } = await api.all(projectPath(api, project, "/work-items/"), SEARCH_QUERY);
+  return results.filter((item) => matchesQuery(item, lower)).map((item) => ({ ...item, project_identifier: project.identifier }));
+}
+
+// Only reached for --workspace: the workspace search endpoint is absent on some Plane
+// deployments (it 404s), and the fallback then has to scan every project in the workspace.
+async function searchWorkspace(api, lower, query) {
   try {
-    const body = await api.get(api.workspacePath("/search/"), { search: query, type: "work_item" });
-    items = searchItems(body);
+    return searchItems(await api.get(api.workspacePath("/search/"), { search: query, type: "work_item" }));
   } catch (error) {
     if (error.status !== 404) throw error;
-    const projects = (await api.all(api.workspacePath("/projects/"))).results;
-    const lower = query.toLowerCase();
-    for (const project of projects) {
-      const projectItems = (await api.all(projectPath(api, project, "/work-items/"), SEARCH_QUERY)).results;
-      items.push(...projectItems.filter((item) => `${item.name || ""}\n${stripHtml(item.description_html || item.description || "")}`.toLowerCase().includes(lower)).map((item) => ({ ...item, project_identifier: project.identifier })));
-    }
   }
-  if (!items.length) return { wi: `0 work items matching ${query}` };
+  const projects = (await api.all(api.workspacePath("/projects/"))).results;
+  const items = [];
+  for (const project of projects) items.push(...await scanProject(api, project, lower));
+  return items;
+}
+
+// Search is scoped to the selected project by default. It used to be workspace-wide with no
+// way to narrow it, which put other projects' work items in front of a caller working in this
+// one — the first step of a cross-project reference leaking into scoped work. Scoping it also
+// turns the fallback's every-project scan into a single-project one. `--workspace` still
+// searches everything for callers who mean to; it is read-only, and the scoped path is what
+// runs unless it is asked for.
+export async function wiSearch({ api, flags, positionals, cwd }) {
+  const query = positionals.join(" ");
+  const lower = query.toLowerCase();
+  const limit = limitValue(flags);
+  if (flags.workspace && flags.project) throw new UsageError("search accepts at most one of --workspace or --project", "Use at most one of --workspace or --project");
+  const boundary = flags.workspace ? null : await findProjectConfig(cwd);
+  const scopeRef = flags.workspace ? null : (flags.project || boundary?.project);
+  const project = scopeRef
+    ? await assertProjectInScope(api, await resolveProject(api, scopeRef), boundary, undefined, `project ${scopeRef}`)
+    : null;
+  let items = project ? await scanProject(api, project, lower) : await searchWorkspace(api, lower, query);
+  if (!items.length) return { wi: `0 work items matching ${query}${project ? ` in ${project.identifier}` : ""}` };
   const total = items.length;
   items = items.slice(0, limit);
   const hints = ["Run `plane-axi wi view <ref>` for details"];
-  if (items.length < total) hints.push(`Run \`plane-axi wi search ${query} --all\` for all ${total} matches`);
-  return withHelp({ count: `${items.length} of ${total} matching`, wi: items.map((item) => ({
-    seq: item.sequence_id && (item.project_identifier || item.project_detail?.identifier) ? `${item.project_identifier || item.project_detail.identifier}-${item.sequence_id}` : item.id,
-    title: item.name || item.title,
-    project: item.project_identifier || item.project_detail?.identifier || item.project || ""
-  })) }, hints);
+  if (items.length < total) hints.push(`Run \`plane-axi wi search ${query}${flags.project ? ` --project ${flags.project}` : ""}${flags.workspace ? " --workspace" : ""} --all\` for all ${total} matches`);
+  const row = (item) => {
+    const identifier = item.project_identifier || item.project_detail?.identifier;
+    const rendered = { seq: item.sequence_id && identifier ? `${identifier}-${item.sequence_id}` : item.id, title: item.name || item.title };
+    // A scoped search names its project once in the payload, so repeating it on every row is
+    // pure output weight; a workspace search needs it per row to stay unambiguous.
+    return project ? rendered : { ...rendered, project: identifier || item.project || "" };
+  };
+  const payload = { count: `${items.length} of ${total} matching`, ...(project ? { project: project.identifier } : {}), wi: items.map(row) };
+  return withHelp(payload, hints);
 }
 
 export const _internals = { requestedFields, limitValue, checkPriority, compactItem, searchItems };
