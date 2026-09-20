@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/aiLabSolution/plane-axi/compare/v0.4.0...v0.5.0) (2026-09-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* enforce stable claim ownership (NORDLIS-18) ([#20](https://github.com/aiLabSolution/plane-axi/issues/20))
+
+### Bug Fixes
+
+* enforce stable claim ownership (NORDLIS-18) ([#20](https://github.com/aiLabSolution/plane-axi/issues/20)) ([e075317](https://github.com/aiLabSolution/plane-axi/commit/e075317ab84a66ab4899ccae04f9220603268a9f))
+
 ## [0.4.0](https://github.com/aiLabSolution/plane-axi/compare/v0.3.2...v0.4.0) (2026-08-24)
 
 
