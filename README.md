@@ -123,6 +123,36 @@ List and search scans also request only the fields each command needs (`?fields=
 
 Some Cloudflare-fronted Plane instances filter unrecognized `User-Agent` headers. `plane-axi` sends `plane-axi/<version>` by default; set `PLANE_USER_AGENT` to override it (a known-safe value in the field is `plane-cli/1.0`) if your instance blocks the default. If a request is blocked by the WAF before it reaches Plane, the response is an HTML challenge page rather than Plane's JSON, and `plane-axi` reports it distinctly as `Cloudflare WAF blocked the request` rather than a misleading authentication failure. This is most often triggered by a work-item body containing path-traversal-looking strings (`../`) or literal shell command lines — rephrase the body and retry. A `GET` that fails to connect at the network level (not a WAF block) is retried once after a one-second pause before failing; mutating requests (`POST`/`PATCH`/`DELETE`) are never retried, since a replay could double-write.
 
+## Claim ownership
+
+Use one stable identity across separate CLI invocations:
+
+```sh
+plane-axi claim LABS-42 --agent labs-42-worker --task "implementation" --ttl 360
+plane-axi heartbeat LABS-42 --agent labs-42-worker --ttl 360
+plane-axi release LABS-42 --agent labs-42-worker
+```
+
+Alternatively export `PLANE_AGENT_ID` once for the session. Existing stable session
+variables remain supported; there is no hostname/process-ID fallback. Identities must
+start with a letter or digit and contain only letters, digits, `_ . : @ -` (200 characters
+maximum). A missing or malformed identity is a usage error (exit 2).
+
+Heartbeat only renews the caller's unexpired, valid lease. An absent, released, expired or
+invalid lease returns `NOT OWNED`; another live owner returns `CONTENDED` (exit 3). Neither
+case writes a ledger record or changes assignment. Stop work and use the ordinary claim
+path for reacquisition. Heartbeat never creates a claim or accepts shared ownership.
+
+Release returns `not-owned` without mutations if the caller has no active lease. Releasing
+an owned lease preserves assignment while another live owner remains. Always inspect the
+result and `status`; a successful command is not proof that a foreign lease was released.
+The ledger retains all recorded owners, even after many newer heartbeat comments.
+
+Claims remain cooperative, not a server-side atomic lock: simultaneous writes and delayed
+API visibility still require checking `status` and honoring contention. Use separate work
+items for parallel work, not a shared identity. A handoff may transfer the stable identity
+only after the predecessor has stopped writing.
+
 ## Agent integration
 
 Install compact SessionStart context for Claude Code, Codex, and OpenCode:

@@ -64,7 +64,7 @@ function itemFix(overrides = {}) {
 
 test("claim writes a project-tagged ledger line and assigns self", async () => {
   const { api, record } = makeApi({ items: [itemFix()] });
-  const out = await claim({ api, flags: { task: "auth thread" }, positionals: ["LABS-42"], cwd: "/tmp" });
+  const out = await claim({ api, flags: { agent: "me-id", task: "auth thread" }, positionals: ["LABS-42"], cwd: "/tmp" });
   const comment = record.posts.at(-1).data.comment_html;
   assert.match(comment, /^<p>LABS-CLAIM v1 agent=\S+ task='auth thread' until=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00<\/p>$/);
   assert.deepEqual(record.patches.at(-1).data.assignees, ["me-id"]);
@@ -73,21 +73,21 @@ test("claim writes a project-tagged ledger line and assigns self", async () => {
 
 test("claim --start transitions to In Progress", async () => {
   const { api, record } = makeApi({ items: [itemFix()] });
-  await claim({ api, flags: { task: "x", start: true }, positionals: ["LABS-42"], cwd: "/tmp" });
+  await claim({ api, flags: { agent: "me-id", task: "x", start: true }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(record.patches.at(-1).data.state, "st-prog");
 });
 
 test("claim is CONTENDED (exit 3) when another agent holds a live claim", async () => {
   const { api } = makeApi({ items: [itemFix()], comments: [ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00")] });
   await assert.rejects(
-    () => claim({ api, flags: { task: "mine" }, positionals: ["LABS-42"], cwd: "/tmp" }),
+    () => claim({ api, flags: { agent: "me-id", task: "mine" }, positionals: ["LABS-42"], cwd: "/tmp" }),
     (e) => e.name === "AxiError" && e.exitCode === 3 && /CONTENDED/.test(e.message)
   );
 });
 
 test("claim --force overrides a live rival and notes the shared item", async () => {
   const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00")] });
-  const out = await claim({ api, flags: { task: "mine", force: true }, positionals: ["LABS-42"], cwd: "/tmp" });
+  const out = await claim({ api, flags: { agent: "me-id", task: "mine", force: true }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.result, "claimed");
   assert.ok(out.note.some((n) => /shared: also held by rival/.test(n)));
   assert.deepEqual(record.patches.at(-1).data.assignees, ["me-id"]);
@@ -100,7 +100,7 @@ test("claim loses the race when a rival's earlier claim surfaces on re-read, and
   const mine = ledger("me-id", "CLAIM", FUTURE, "mine", "2026-07-24T10:00:05+00:00");
   const { api, record } = makeApi({ items: [itemFix()], commentSnapshots: [[], [rival, mine]] });
   await assert.rejects(
-    () => claim({ api, flags: { task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
+    () => claim({ api, flags: { agent: "me-id", task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
     (e) => e.name === "AxiError" && e.exitCode === 3 && /LOST RACE/.test(e.message)
   );
   assert.equal(record.patches.length, 0, "must not assign after losing the race");
@@ -109,39 +109,52 @@ test("claim loses the race when a rival's earlier claim surfaces on re-read, and
 
 test("an expired rival claim (past until) does not block a new claim", async () => {
   const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("rival", "CLAIM", PAST, "stale", "2020-01-01T00:00:00+00:00")] });
-  const out = await claim({ api, flags: { task: "mine" }, positionals: ["LABS-42"], cwd: "/tmp" });
+  const out = await claim({ api, flags: { agent: "me-id", task: "mine" }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.result, "claimed");
   assert.deepEqual(record.patches.at(-1).data.assignees, ["me-id"]);
 });
 
 test("claim on a non-ready item warns but proceeds", async () => {
   const { api } = makeApi({ items: [itemFix({ state: "st-prog" })] });
-  const out = await claim({ api, flags: { task: "x" }, positionals: ["LABS-42"], cwd: "/tmp" });
+  const out = await claim({ api, flags: { agent: "me-id", task: "x" }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.result, "claimed");
   assert.ok(out.note.some((n) => /state is 'In Progress', not 'ready-for-agent'/.test(n)));
 });
 
-test("heartbeat extends a live claim as HEARTBEAT, else posts CLAIM", async () => {
-  const withClaim = makeApi({ items: [itemFix()], comments: [ledger("me-id", "CLAIM", FUTURE, "t", "2026-07-24T10:00:00+00:00")] });
-  const hb = await heartbeat({ api: withClaim.api, flags: { agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" });
-  assert.equal(hb.result, "heartbeat");
-  assert.match(withClaim.record.posts.at(-1).data.comment_html, /LABS-HEARTBEAT v1 agent=me-id/);
-
-  const noClaim = makeApi({ items: [itemFix()] });
-  const cl = await heartbeat({ api: noClaim.api, flags: { agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" });
-  assert.equal(cl.result, "claim");
-  assert.ok(cl.note.some((n) => /no live claim/.test(n)));
+test("heartbeat extends only a live owned claim and preserves the task", async () => {
+  const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("me-id", "CLAIM", FUTURE, "owned task", "2026-07-24T10:00:00Z")] });
+  const out = await heartbeat({ api, flags: { agent: "me-id", ttl: "360" }, positionals: ["LABS-42"], cwd: "/tmp" });
+  assert.equal(out.result, "heartbeat");
+  assert.match(record.posts[0].data.comment_html, /HEARTBEAT v1 agent=me-id task='owned task'/);
+  assert.equal(record.patches.length, 0);
 });
 
+for (const [name, comments] of [
+  ["missing", []],
+  ["expired", [ledger("me-id", "CLAIM", PAST, "t", "2026-07-24T10:00:00Z")]],
+  ["released", [ledger("me-id", "RELEASE", null, null, "2026-07-24T10:00:00Z")]],
+  ["invalid expiry", [ledger("me-id", "CLAIM", "invalid", "t", "2026-07-24T10:00:00Z")]],
+  ["missing expiry", [ledger("me-id", "CLAIM", null, "t", "2026-07-24T10:00:00Z")]],
+  ["foreign", [ledger("rival", "CLAIM", FUTURE, "t", "2026-07-24T10:00:00Z")]],
+  ["shared", [ledger("me-id", "CLAIM", FUTURE, "t", "2026-07-24T10:00:00Z"), ledger("rival", "CLAIM", FUTURE, "t", "2026-07-24T10:00:00Z")]],
+]) {
+  test(`heartbeat refuses ${name} ownership without writes`, async () => {
+    const { api, record } = makeApi({ items: [itemFix()], comments });
+    await assert.rejects(() => heartbeat({ api, flags: { agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }), error => error.exitCode === 3);
+    assert.deepEqual(record, { posts: [], patches: [] });
+  });
+}
+
+
 test("release clears the assignee when no other live claim remains", async () => {
-  const { api, record } = makeApi({ items: [itemFix()] });
+  const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("me-id", "CLAIM", FUTURE, "t", "2026-07-24T10:00:00Z")] });
   const out = await release({ api, flags: { agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.assignee, "cleared");
   assert.deepEqual(record.patches.at(-1).data.assignees, []);
 });
 
 test("release keeps the assignee while another agent still holds a live claim", async () => {
-  const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("other", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00")] });
+  const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("me-id", "CLAIM", FUTURE, "mine", "2026-07-24T09:00:00Z"), ledger("other", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00")] });
   const out = await release({ api, flags: { agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.assignee, "kept");
   assert.deepEqual(out.live_claims, ["other"]);
@@ -193,7 +206,7 @@ test("isoUtc emits seconds precision with an explicit +00:00 offset", () => {
 });
 
 test("release --keep-assignee drops the claim but stays assigned", async () => {
-  const { api, record } = makeApi({ items: [itemFix()] });
+  const { api, record } = makeApi({ items: [itemFix()], comments: [ledger("me-id", "CLAIM", FUTURE, "t", "2026-07-24T10:00:00Z")] });
   const out = await release({ api, flags: { agent: "me-id", "keep-assignee": true }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.assignee, "kept (by request)");
   assert.equal(record.patches.length, 0, "must not touch assignees when keeping them");
@@ -203,7 +216,7 @@ test("claim --force proceeds even when a rival's earlier claim surfaces post-wri
   const rival = ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00");
   const mine = ledger("me-id", "CLAIM", FUTURE, "mine", "2026-07-24T10:00:05+00:00");
   const { api, record } = makeApi({ items: [itemFix()], commentSnapshots: [[], [rival, mine]] });
-  const out = await claim({ api, flags: { task: "mine", agent: "me-id", force: true }, positionals: ["LABS-42"], cwd: "/tmp" });
+  const out = await claim({ api, flags: { agent: "me-id", task: "mine", agent: "me-id", force: true }, positionals: ["LABS-42"], cwd: "/tmp" });
   assert.equal(out.result, "claimed");
   assert.deepEqual(record.patches.at(-1).data.assignees, ["me-id"], "assigns rather than withdrawing under --force");
   assert.ok(!record.posts.some((p) => /LABS-RELEASE/.test(p.data.comment_html)), "must not withdraw under --force");
@@ -214,7 +227,7 @@ test("claim backs off when its own record has not surfaced on re-read (mineAt=In
   const rival = ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:09+00:00");
   const { api, record } = makeApi({ items: [itemFix()], commentSnapshots: [[], [rival]] });
   await assert.rejects(
-    () => claim({ api, flags: { task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
+    () => claim({ api, flags: { agent: "me-id", task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
     (e) => e.exitCode === 3 && /LOST RACE/.test(e.message)
   );
   assert.equal(record.patches.length, 0);
@@ -255,21 +268,21 @@ test("claim is still CONTENDED when chatter buries the rival's ledger line", asy
   const rival = ledger("rival", "CLAIM", FUTURE, "theirs", "2026-07-24T10:00:00+00:00");
   const { api, record } = makeApi({ items: [itemFix()], comments: [rival, ...chatter(60)] });
   await assert.rejects(
-    () => claim({ api, flags: { task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
+    () => claim({ api, flags: { agent: "me-id", task: "mine", agent: "me-id" }, positionals: ["LABS-42"], cwd: "/tmp" }),
     (e) => e.exitCode === 3 && /CONTENDED/.test(e.message)
   );
   assert.equal(record.patches.length, 0, "must not stomp the buried holder's assignee");
 });
 
-test("readClaims keeps the newest CLAIM_TAIL ledger rows when ledger rows exceed the cap", async () => {
-  // 45 agents, each with one CLAIM: only the newest 40 stay authoritative.
+test("readClaims retains live ownership beyond forty newer ledger records", async () => {
+  // A still-live older owner must not vanish because other agents wrote newer records.
   const rows = Array.from({ length: 45 }, (_, i) =>
     ledger(`agent${String(i).padStart(2, "0")}`, "CLAIM", FUTURE, "t", `2026-07-24T13:${String(i).padStart(2, "0")}:00+00:00`));
   const { api } = makeApi({ items: [itemFix()], comments: rows });
   const live = await _internals.readClaims(api, PROJECT, "i42");
-  assert.equal(Object.keys(live).length, 40, "authority window is still bounded at CLAIM_TAIL");
+  assert.equal(Object.keys(live).length, 45);
   assert.ok(live.agent44, "newest ledger row survives");
-  assert.ok(!live.agent04, "oldest ledger row beyond the cap is dropped");
+  assert.ok(live.agent00, "oldest live owner remains authoritative");
 });
 
 test("next reports the matching total, not the truncated count, and hints the escape hatch", async () => {
@@ -305,7 +318,18 @@ test("claim refuses a work item outside the selected project before writing a le
     patch: async () => { throw new Error("a cross-project claim must never reach the API"); }
   };
   await assert.rejects(
-    () => claim({ api, flags: { task: "work", ttl: "360" }, positionals: ["OTHER-7"], cwd }),
+    () => claim({ api, flags: { agent: "me-id", task: "work", ttl: "360" }, positionals: ["OTHER-7"], cwd }),
     (error) => error.name === "AxiError" && error.message === "OTHER-7 is outside the selected project LABS"
   );
+});
+
+for (const agent of ["bad identity", "bad\nidentity", " bad", "bad=ledger", "x".repeat(201)]) {
+  test(`invalid identity is rejected: ${JSON.stringify(agent)}`, () => {
+    assert.throws(() => _internals.agentId({ agent }), error => error.name === "UsageError");
+  });
+}
+
+test("explicit identity wins over the environment and is safe as a map key", () => {
+  assert.equal(_internals.agentId({ agent: "constructor" }), "constructor");
+  assert.equal(_internals.agentId({ agent: "worker-42:a_b@example" }), "worker-42:a_b@example");
 });

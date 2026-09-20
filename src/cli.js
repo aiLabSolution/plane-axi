@@ -59,16 +59,16 @@ export const COMMAND_METADATA = {
   }, [], ["plane-axi next", "plane-axi next --stage S2", "plane-axi next --limit 5"]),
   "claim": spec("Claim a work item (TTL'd advisory lock) and flag it taken", "plane-axi claim <ref> [--task <t>] [--ttl <min>] [--start]", commands.claim, {
     project: projectFlag, task: flag("Sub-task / files this claim covers"), ttl: flag("Claim lifetime in minutes", { default: "90" }),
-    agent: flag("Agent identity (default: session id / host:pid)"), force: flag("Claim even if another agent holds a live claim (shared item)", { boolean: true }),
+    agent: flag("Stable identity (--agent or session environment; no per-process fallback)"), force: flag("Claim even if another agent holds a live claim (shared item)", { boolean: true }),
     start: flag("Also transition the item to 'In Progress'", { boolean: true }), "start-state": flag("Transition to this state instead of 'In Progress' (implies --start)"),
     "ready-state": flag("Expected ready state name", { default: "ready-for-agent" })
   }, ["ref"], ["plane-axi claim LABS-42 --task \"auth thread\"", "plane-axi claim LABS-42 --task \"...\" --start"]),
   "status": spec("Show claim ownership of a work item", "plane-axi status <ref>", commands.claimStatus, { project: projectFlag }, ["ref"], ["plane-axi status LABS-42"]),
-  "heartbeat": spec("Extend your claim's TTL (task carries over)", "plane-axi heartbeat <ref> [--ttl <min>]", commands.heartbeat, {
-    project: projectFlag, ttl: flag("Claim lifetime in minutes", { default: "90" }), agent: flag("Agent identity (default: session id / host:pid)")
+  "heartbeat": spec("Renew only your valid active claim (task carries over)", "plane-axi heartbeat <ref> [--ttl <min>]", commands.heartbeat, {
+    project: projectFlag, ttl: flag("Claim lifetime in minutes", { default: "90" }), agent: flag("Stable identity (--agent or session environment; no per-process fallback)")
   }, ["ref"], ["plane-axi heartbeat LABS-42", "plane-axi heartbeat LABS-42 --ttl 120"]),
   "release": spec("Release your claim (unassign if no other live claim remains)", "plane-axi release <ref>", commands.release, {
-    project: projectFlag, agent: flag("Agent identity (default: session id / host:pid)"), "keep-assignee": flag("Release the claim but stay assigned", { boolean: true })
+    project: projectFlag, agent: flag("Stable identity (--agent or session environment; no per-process fallback)"), "keep-assignee": flag("Release the claim but stay assigned", { boolean: true })
   }, ["ref"], ["plane-axi release LABS-42", "plane-axi release LABS-42 --keep-assignee"]),
   "api": spec("Call a Plane API path directly", "plane-axi api <METHOD> <path> [--input <json>]", commands.rawApi, { input: flag("JSON request body") }, ["METHOD", "path"], ["plane-axi api GET /users/me/", "plane-axi api POST /workspaces/example/projects/ --input '{\"name\":\"Test\"}'"]),
   "setup": spec("Install session hooks or the generated skill", "plane-axi setup [--app <app>] [--scope <scope>] [--skill]", commands.setup, {

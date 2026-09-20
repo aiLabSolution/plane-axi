@@ -17,7 +17,6 @@
 // earlier timestamp we withdraw (first-writer-wins settles the claim/claim race). `release`
 // keeps the coarse assignee flag while any other agent still holds a live claim on a shared
 // item, so it doesn't resurface in another agent's `next` mid-work.
-import os from "node:os";
 import { AxiError, UsageError } from "../errors.js";
 import { stripHtml, withHelp } from "../output.js";
 import { UUID } from "../resolve.js";
@@ -25,18 +24,20 @@ import { currentProject, currentWorkItem, projectPath } from "./common.js";
 
 const DEFAULT_READY_STATE = "ready-for-agent";
 const DEFAULT_TTL_MINUTES = 90;
-const CLAIM_TAIL = 40; // only the most recent ledger comments can still be authoritative
 const PRIORITY_RANK = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
 const STAGE_RE = /^\s*\[S(\d+)(?:\.(\d+))?\]/; // "[S2.9] ..." title prefix -> (2, 9)
 
 function agentId(flags) {
-  return flags.agent
+  const agent = flags.agent
     || process.env.PLANE_AGENT_ID
     || process.env.LIS_AGENT_ID
     || process.env.CODEX_THREAD_ID
     || process.env.CODEX_SESSION_ID
-    || process.env.CLAUDE_CODE_SESSION_ID
-    || `${os.hostname()}:${process.pid}`;
+    || process.env.CLAUDE_CODE_SESSION_ID;
+  if (!agent || !/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$/.test(agent)) {
+    throw new UsageError("a stable agent identity is required", "Pass --agent <stable-id> on claim, heartbeat and release, or export PLANE_AGENT_ID once for the session");
+  }
+  return agent;
 }
 
 function ttlMinutes(flags) {
@@ -140,20 +141,14 @@ async function postLedger(api, project, itemId, verb, agent, task, until) {
 async function readClaims(api, project, itemId) {
   const { results } = await api.all(`${itemUrl(api, project, itemId)}comments/`, { fields: "created_at,comment_stripped,comment_html" });
   const re = ledgerRe(project);
-  // CLAIM_TAIL bounds LEDGER rows, not raw comments. Slicing the raw tail first let ordinary
-  // discussion evict the records that prove ownership: with CLAIM_TAIL newer non-ledger
-  // comments the reader saw no claims at all, so `status` reported "none", claim's CONTENDED
-  // gate never fired, and the assignee PATCH stomped a live holder. The protocol truncates its
-  // own history too — postLedger appends a comment per claim/heartbeat/release.
-  // isLedger drops the /g/ flag: .test() on a global regex advances lastIndex between calls
-  // and would skip every other row. `re` keeps /g/ because matchAll requires it.
+  // Reduce all ledger rows already fetched. A global tail cap can evict a still-live
+  // owner's only record when another session heartbeats or releases repeatedly.
   const isLedger = new RegExp(re.source);
   const rows = results
     .map((row) => ({ row, text: row.comment_stripped || stripHtml(row.comment_html || "") }))
     .filter(({ text }) => isLedger.test(text))
-    .sort((a, b) => tsMs(a.row.created_at) - tsMs(b.row.created_at))
-    .slice(-CLAIM_TAIL);
-  const latest = {};
+    .sort((a, b) => tsMs(a.row.created_at) - tsMs(b.row.created_at));
+  const latest = Object.create(null);
   for (const { row, text } of rows) {
     for (const match of text.matchAll(re)) {
       const [, verb, agent, single, double, bare, until] = match;
@@ -161,7 +156,7 @@ async function readClaims(api, project, itemId) {
     }
   }
   const now = Date.now();
-  const live = {};
+  const live = Object.create(null);
   for (const [agent, claim] of Object.entries(latest)) {
     if (claim.verb === "RELEASE") continue;
     const parsed = claim.until ? parseMs(claim.until) : NaN;
@@ -227,13 +222,23 @@ export async function heartbeat(ctx) {
   const agent = agentId(flags);
   const ttl = ttlMinutes(flags);
   const seq = `${project.identifier}-${item.sequence_id}`;
-  const mine = (await readClaims(api, project, item.id))[agent];
-  const verb = mine ? "HEARTBEAT" : "CLAIM"; // nothing live to extend -> this *is* a claim
+  const claims = await readClaims(api, project, item.id);
+  const rivals = Object.entries(claims).filter(([id, lease]) => id !== agent && lease.active);
+  if (rivals.length) {
+    throw new AxiError(`CONTENDED: ${seq} has another live owner: ${rivals.map(([id]) => id).join(", ")}`, {
+      help: "Stop work and resolve ownership; heartbeat cannot acquire or share a claim", exitCode: 3
+    });
+  }
+  const mine = claims[agent];
+  if (!mine?.active || !Number.isFinite(parseMs(mine.until)) || parseMs(mine.until) <= Date.now()) {
+    throw new AxiError(`NOT OWNED: ${seq} has no valid active lease for ${agent}`, {
+      help: `Stop work; use plane-axi claim ${seq} --agent ${agent} to reacquire through the contention check`, exitCode: 3
+    });
+  }
   const until = new Date(Date.now() + ttl * 60_000);
-  await postLedger(api, project, item.id, verb, agent, mine?.task || "", until);
-  const payload = { [verb.toLowerCase()]: { work_item: seq, agent, until: isoUtc(until) }, result: verb.toLowerCase() };
-  const notes = mine ? [] : [`no live claim by ${agent} — posted CLAIM instead`];
-  return withHelp(notes.length ? { ...payload, note: notes } : payload, [`Run \`plane-axi status ${seq}\` to verify`]);
+  await postLedger(api, project, item.id, "HEARTBEAT", agent, mine.task, until);
+  return withHelp({ heartbeat: { work_item: seq, agent, until: isoUtc(until) }, result: "heartbeat" },
+    [`Run \`plane-axi status ${seq}\` to verify`]);
 }
 
 export async function release(ctx) {
@@ -241,6 +246,11 @@ export async function release(ctx) {
   const { project, item } = await itemContext(ctx);
   const agent = agentId(flags);
   const seq = `${project.identifier}-${item.sequence_id}`;
+  const before = await readClaims(api, project, item.id);
+  if (!before[agent]?.active) {
+    return { release: { work_item: seq, agent }, result: "not-owned", assignee: "unchanged",
+      live_claims: Object.entries(before).filter(([, lease]) => lease.active).map(([id]) => id) };
+  }
   await postLedger(api, project, item.id, "RELEASE", agent);
   const others = Object.entries(await readClaims(api, project, item.id)).filter(([a, c]) => a !== agent && c.active);
   if (others.length) {

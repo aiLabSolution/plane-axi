@@ -85,7 +85,7 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 
 ### heartbeat
 
-- `npx -y github:aiLabSolution/plane-axi heartbeat <ref> [--ttl <min>]` — Extend your claim's TTL (task carries over)
+- `npx -y github:aiLabSolution/plane-axi heartbeat <ref> [--ttl <min>]` — Renew only your valid active claim (task carries over)
 
 ### release
 
@@ -105,6 +105,8 @@ Set `PLANE_API_KEY` and `PLANE_WORKSPACE` (or `PLANE_WORKSPACE_SLUG`). Run `npx 
 
 ## Operating rules
 
+- Use one stable `--agent <stable-id>` (or `PLANE_AGENT_ID`) for claim, heartbeat and release; no per-process fallback exists.
+- Heartbeat never acquires a claim: stop on `NOT OWNED` or `CONTENDED`. Release `not-owned` is a no-op, not proof of releasing another owner.
 - Prefer readable references such as `LABS-42`; UUIDs are also accepted.
 - Run a command with `--help` for its complete flags and examples.
 - Use `--full` only when a truncated work-item body needs expansion.
